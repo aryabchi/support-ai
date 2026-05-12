@@ -1,30 +1,26 @@
 from functools import lru_cache
-from typing import Any, Annotated
 from pydantic_settings import (
     BaseSettings,
     SettingsConfigDict,
-    NoDecode,
 )
 
 from pydantic import (
     Field,
     PostgresDsn,
     AnyHttpUrl,
-    BeforeValidator,
 )
 
-
 # custom csv parser func
-def parse_comma_separated(v: Any) -> list[str]:
-    if isinstance(v, str):
-        return [item.strip() for item in v.split(",")]
-    return v
+# def parse_comma_separated(v: Any) -> list[str]:
+#     if isinstance(v, str):
+#         return [item.strip() for item in v.split(",")]
+#     return v
 
 
 # custom annotation for csv env vars
-CommaSeparatedList = Annotated[
-    list[str], NoDecode, BeforeValidator(parse_comma_separated)
-]
+# CommaSeparatedList = Annotated[
+#     list[str], NoDecode, BeforeValidator(parse_comma_separated)
+# ]
 
 
 class Settings(BaseSettings):
@@ -92,8 +88,9 @@ class Settings(BaseSettings):
     )
 
     # === Безопасность ===
-    CORS_ORIGINS: CommaSeparatedList = Field(
-        default=[], description="Разрешённые CORS источники"
+    CORS_ORIGINS: list[str] = Field(
+        default=["http://localhost:3000", "http://localhost:8080"],
+        description="Разрешённые CORS источники",
     )
 
     RATE_LIMIT_PER_MINUTE: int = Field(
