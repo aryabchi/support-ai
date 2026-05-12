@@ -1,2 +1,9 @@
 # support-ai
-LangGraph AI Assistant for Support Service
+AI Assistant for Support Service
+
+# Tech Stack
+
+- LangGraph (agents orchestration)
+- FastAPI (endpoints)
+- Ollama (LLMs)
+- PostgreSQL (state persistence) 
