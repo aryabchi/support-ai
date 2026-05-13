@@ -43,4 +43,4 @@ class TicketHistory(Base):
     )
 
     def __repr__(self) -> str:
-        return f""
+        return f"TicketHistory id={self.id}"

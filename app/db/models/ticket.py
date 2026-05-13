@@ -66,4 +66,4 @@ class Ticket(Base):
     )
 
     def __repr__(self) -> str:
-        return f""
+        return f"Ticket id={self.id}"

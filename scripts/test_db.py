@@ -27,7 +27,7 @@ async def test_connection():
 
         async with factory() as session:
             # Простой запрос для проверки подключения
-            result = await session.scalar(text("SELECT 1"))
+            _ = await session.scalar(text("SELECT 1"))
             print("Подключение к БД: успешно")
 
             # Тестовая вставка (не коммитим, чтобы не засорять БД)
