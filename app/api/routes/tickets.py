@@ -9,24 +9,58 @@ from app.api.schemas.ticket import (
     TicketResponse,
     TicketListResponse,
 )
+from app.core.dependencies import get_agent_graph, get_telegram_client_context
 
 router = APIRouter(prefix="/tickets", tags=["tickets"])
+
+
+# @router.post("/", response_model=TicketResponse, status_code=status.HTTP_201_CREATED)
+# async def create_ticket_endpoint(
+#     ticket_in: TicketCreate, db: AsyncSession = Depends(get_db_session)
+# ) -> TicketResponse:
+#     """
+#     Создаёт новую заявку.
+
+#     - **thread_id**: идентификатор сессии пользователя
+#     - **user_input**: текст заявки (1-10000 символов)
+#     - **priority**: low, medium, high или critical (по умолчанию medium)
+#     """
+#     db_ticket = await ticket_crud.create_ticket(db, ticket_in)
+
+#     # Конвертируем ORM-объект в Pydantic-схему для ответа
+#     return TicketResponse.model_validate(db_ticket)
 
 
 @router.post("/", response_model=TicketResponse, status_code=status.HTTP_201_CREATED)
 async def create_ticket_endpoint(
     ticket_in: TicketCreate, db: AsyncSession = Depends(get_db_session)
 ) -> TicketResponse:
-    """
-    Создаёт новую заявку.
+    """Создаёт заявку с обработкой через агента."""
 
-    - **thread_id**: идентификатор сессии пользователя
-    - **user_input**: текст заявки (1-10000 символов)
-    - **priority**: low, medium, high или critical (по умолчанию medium)
-    """
-    db_ticket = await ticket_crud.create_ticket(db, ticket_in)
+    agent_graph = get_agent_graph()
 
-    # Конвертируем ORM-объект в Pydantic-схему для ответа
+    initial_state = {
+        "thread_id": ticket_in.thread_id,
+        "user_input": ticket_in.user_input,
+    }
+
+    # Запуск агента с передачей зависимостей через config
+    async with get_telegram_client_context() as telegram_client:
+        result_state = await agent_graph.ainvoke(
+            initial_state,
+            config={
+                "configurable": {"session": db, "telegram_client": telegram_client}
+            },
+        )
+
+    if result_state.get("error"):
+        raise HTTPException(status_code=500, detail=result_state["error"])
+
+    # Получаем уже сохранённую заявку по id от агента
+    if not result_state.get("ticket_id"):
+        raise HTTPException(status_code=500, detail="Agent did not return ticket_id")
+
+    db_ticket = await ticket_crud.get_ticket_by_id(db, result_state["ticket_id"])
     return TicketResponse.model_validate(db_ticket)
 
 
