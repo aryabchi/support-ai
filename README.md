@@ -7,3 +7,13 @@ AI Assistant for Support Service
 - FastAPI (endpoints)
 - Ollama (LLMs)
 - PostgreSQL (state persistence) 
+
+
+# Dependencies
+
+- Python 3.11.9
+- requirements.txt
+- llama3.1:latest
+`ollama pull llama3.1:latest`
+- postgres:18-alpine via Docker
+`docker run -d --name support-ai-db -e POSTGRES_USER=<your_user_name> -e POSTGRES_PASSWORD=<your_user_pass> -e POSTGRES_DB=support_db -p 5432:5432 -v postgres-data:/var/lib/postgresql postgres:18-alpine`
