@@ -2,6 +2,7 @@ from typing import Literal
 
 from app.agent.state import AgentState
 from langgraph.graph import StateGraph, START, END
+from langgraph.checkpoint.base import BaseCheckpointSaver
 
 from app.agent.nodes.tagger import tag_ticket
 from app.agent.nodes.saver import save_ticket
@@ -22,8 +23,16 @@ def route_after_alert(state: AgentState) -> Literal["saver"]:
     return "saver"
 
 
-def build_agent_graph():
-    """Строит и компилирует граф агента."""
+def build_agent_graph(checkpointer: BaseCheckpointSaver | None = None):
+    """
+    Строит и компилирует граф агента с опциональной поддержкой чекпоинтов.
+
+    Args:
+        checkpointer: Экземпляр хранилища чекпоинтов (опционально)
+
+    Returns:
+        Скомпилированный граф (CompiledStateGraph)
+    """
 
     workflow = StateGraph(AgentState)
 
@@ -47,4 +56,4 @@ def build_agent_graph():
     # Завершение
     workflow.add_edge("saver", END)
 
-    return workflow.compile()
+    return workflow.compile(checkpointer=checkpointer)

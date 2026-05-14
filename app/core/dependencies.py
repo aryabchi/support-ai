@@ -3,7 +3,6 @@ from functools import lru_cache
 from contextlib import asynccontextmanager
 
 from app.config import get_settings
-from app.agent.graph import build_agent_graph
 
 
 @lru_cache
@@ -42,6 +41,11 @@ async def get_telegram_client_context():
 @lru_cache
 def get_agent_graph():
     """
-    Создаёт и кэширует компилированный граф агента.
+    Возвращает функцию для построения графа агента.
+
+    Граф компилируется с checkpointer при вызове, поэтому кэшируем
+    саму функцию build_agent_graph, а не результат её выполнения.
     """
-    return build_agent_graph()
+    from app.agent.graph import build_agent_graph
+
+    return build_agent_graph
