@@ -96,6 +96,13 @@ class Settings(BaseSettings):
     RATE_LIMIT_PER_MINUTE: int = Field(
         default=60, gt=0, description="Лимит запросов в минуту на пользователя"
     )
+    # === Telegram (алерты для критичных заявок) ===
+    # Токен бота от @BotFather
+    TELEGRAM_BOT_TOKEN: str | None
+
+    # Chat ID пользователя/канала для получения уведомлений
+    # Получите через @userinfobot
+    TELEGRAM_CHAT_ID: str | None
 
     # === Свойства для удобства ===
     @property

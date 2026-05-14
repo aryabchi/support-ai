@@ -14,23 +14,6 @@ from app.core.dependencies import get_agent_graph, get_telegram_client_context
 router = APIRouter(prefix="/tickets", tags=["tickets"])
 
 
-# @router.post("/", response_model=TicketResponse, status_code=status.HTTP_201_CREATED)
-# async def create_ticket_endpoint(
-#     ticket_in: TicketCreate, db: AsyncSession = Depends(get_db_session)
-# ) -> TicketResponse:
-#     """
-#     Создаёт новую заявку.
-
-#     - **thread_id**: идентификатор сессии пользователя
-#     - **user_input**: текст заявки (1-10000 символов)
-#     - **priority**: low, medium, high или critical (по умолчанию medium)
-#     """
-#     db_ticket = await ticket_crud.create_ticket(db, ticket_in)
-
-#     # Конвертируем ORM-объект в Pydantic-схему для ответа
-#     return TicketResponse.model_validate(db_ticket)
-
-
 @router.post("/", response_model=TicketResponse, status_code=status.HTTP_201_CREATED)
 async def create_ticket_endpoint(
     ticket_in: TicketCreate, db: AsyncSession = Depends(get_db_session)
@@ -53,7 +36,8 @@ async def create_ticket_endpoint(
             },
         )
 
-    if result_state.get("error"):
+    if result_state.get("error") and ("alert_failed" not in result_state["error"]):
+        # Ok if error is connected with alerting ("alert_failed")
         raise HTTPException(status_code=500, detail=result_state["error"])
 
     # Получаем уже сохранённую заявку по id от агента
