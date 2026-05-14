@@ -2,7 +2,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from app.db.session import get_db_session
-from config import get_settings, Settings
+from app.config import get_settings, Settings
 from app.crud import ticket as ticket_crud
 from app.api.schemas.ticket import (
     TicketCreate,
