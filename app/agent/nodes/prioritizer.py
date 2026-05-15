@@ -1,5 +1,12 @@
+from tenacity import RetryError
 from app.agent.llm import llm
 from app.agent.state import AgentState
+from app.agent.retry import with_llm_retry
+
+
+@with_llm_retry(max_attempts=3)
+def _prioritize_llm_call(prompt: str):
+    return llm.invoke(prompt)
 
 
 def prioritize_ticket(state: AgentState) -> dict:
@@ -22,7 +29,7 @@ def prioritize_ticket(state: AgentState) -> dict:
 Приоритет:"""
 
     try:
-        response = llm.invoke(prompt)
+        response = _prioritize_llm_call(prompt)
         priority = response.content.strip().lower()
 
         valid_priorities = {"critical", "high", "medium", "low"}
@@ -37,12 +44,24 @@ def prioritize_ticket(state: AgentState) -> dict:
             reasoning=f"{state.reasoning or ''} | Приоритет: {priority}".strip(" |"),
         ).to_dict()
 
+    except RetryError:
+        return AgentState(
+            thread_id=state.thread_id,
+            user_input=state.user_input,
+            category=state.category,
+            priority="medium",
+            error="prioritization_failed: retry_exhausted",
+            reasoning=f"{state.reasoning or ''} | Ошибка: исчерпаны повторные попытки".strip(
+                " |"
+            ),
+        ).to_dict()
+
     except Exception as e:
         return AgentState(
             thread_id=state.thread_id,
             user_input=state.user_input,
             category=state.category,
             priority="medium",
-            error=f"{state.error or ''} prioritization_failed: {str(e)}".strip(),
+            error=f"prioritization_failed: {type(e).__name__}".strip(),
             reasoning=f"{state.reasoning or ''} | Ошибка приоритизации".strip(" |"),
         ).to_dict()

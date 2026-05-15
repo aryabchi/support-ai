@@ -1,5 +1,14 @@
+from tenacity import RetryError
+
 from app.agent.llm import llm
 from app.agent.state import AgentState
+from app.agent.retry import with_llm_retry
+
+
+@with_llm_retry(max_attempts=3)
+def _classify_llm_call(prompt: str):
+    """Внутренняя функция: только вызов LLM, без бизнес-логики."""
+    return llm.invoke(prompt)
 
 
 def classify_ticket(state: AgentState) -> dict:
@@ -23,7 +32,7 @@ def classify_ticket(state: AgentState) -> dict:
 Категория:"""
 
     try:
-        response = llm.invoke(prompt)
+        response = _classify_llm_call(prompt)
         category = response.content.strip().lower()
 
         valid_categories = {"technical", "billing", "feature", "other"}
@@ -37,7 +46,18 @@ def classify_ticket(state: AgentState) -> dict:
             reasoning=f"Классификация: {category}",
         ).to_dict()
 
+    except RetryError:
+        # Обработка исчерпания попыток — бизнес-логика в узле
+        return AgentState(
+            thread_id=state.thread_id,
+            user_input=state.user_input,
+            category="other",
+            error="classification_failed: retry_exhausted",
+            reasoning="Ошибка классификации: исчерпаны повторные попытки",
+        ).to_dict()
+
     except Exception as e:
+        # Другие ошибки (например, неожиданный формат ответа)
         return AgentState(
             thread_id=state.thread_id,
             user_input=state.user_input,
