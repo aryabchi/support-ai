@@ -39,6 +39,7 @@ def setup_logging():
         formatter = jsonlogger.JsonFormatter(
             fmt="%(asctime)s %(name)s %(levelname)s %(message)s %(pathname)s %(lineno)d",
             datefmt="%Y-%m-%dT%H:%M:%SZ",
+            json_ensure_ascii=False,
         )
 
     console_handler.setFormatter(formatter)
