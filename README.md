@@ -8,6 +8,15 @@ AI Assistant for Support Service
 - Ollama (LLMs)
 - PostgreSQL (state persistence) 
 
+# Features
+
+- Agent graph with nodes and conditional edges
+- Agent state persistence (AsyncPostgresSaver checkpointer)
+- Input pydantic validation and sanitization
+- Logging and LangSmith tracing
+- Retry/fallback logic
+- FastAPI endpoints
+- Data models in SQLAlchemy
 
 # Dependencies
 
