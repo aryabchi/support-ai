@@ -22,7 +22,7 @@ def tag_ticket(state: AgentState) -> dict:
     """Назначает теги заявке с санитизацией, защитой от injection и валидацией JSON."""
     start_time = time.time()
     thread_id = state.thread_id
-    logger.debug(f"[{thread_id}] Начало приоритезации")
+    logger.debug(f"[{thread_id}] Начало тегирования")
 
     # 1. Проверка длины ввода
     is_valid, error_msg = validate_input_length(state.user_input)

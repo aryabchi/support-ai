@@ -1,7 +1,9 @@
+import time
 import httpx
 from langgraph.config import RunnableConfig
 from app.config import get_settings
 from app.agent.state import AgentState
+from app.logging_config import logger
 
 
 async def send_critical_alert(state: AgentState, config: RunnableConfig) -> dict:
@@ -10,12 +12,17 @@ async def send_critical_alert(state: AgentState, config: RunnableConfig) -> dict
 
     Зависимости извлекаются из config["configurable"].
     """
+    start_time = time.time()
+    thread_id = state.thread_id
+    logger.debug(f"[{thread_id}] Начало алертинга")
+
     settings = get_settings()
 
     # Извлекаем Telegram-клиент из конфигурации
     telegram_client = config["configurable"].get("telegram_client")
 
     if not telegram_client or not settings.TELEGRAM_CHAT_ID:
+        logger.error(f"[{thread_id}] Telegram не настроен. Алерт не отправлен")
         return AgentState(
             thread_id=state.thread_id,
             user_input=state.user_input,
