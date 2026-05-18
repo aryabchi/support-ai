@@ -4,7 +4,7 @@ from contextlib import asynccontextmanager
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import get_settings
-from app.api.routes import tickets
+from app.api.routes import tickets, health
 from app.db.session import get_engine
 
 
@@ -44,13 +44,7 @@ app.add_middleware(
 
 # Регистрация роутов
 app.include_router(tickets.router)
-
-
-# Health check эндпоинт
-@app.get("/health")
-async def health_check():
-    """Простой эндпоинт для проверки доступности сервиса."""
-    return {"status": "ok"}
+app.include_router(health.router)
 
 
 # Root endpoint с документацией
