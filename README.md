@@ -1,6 +1,9 @@
 # support-ai
 AI Assistant for Support Service
 
+# Description
+TODO
+
 # Tech Stack
 
 - LangGraph (agents orchestration)
@@ -10,7 +13,7 @@ AI Assistant for Support Service
 
 # Features
 
-- Agent graph with nodes and conditional edges
+- Agent graph with LLM and deterministic nodes and conditional edges
 - Agent state persistence (AsyncPostgresSaver checkpointer)
 - Input pydantic validation and sanitization
 - Logging and LangSmith tracing
