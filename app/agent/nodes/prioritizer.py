@@ -1,3 +1,4 @@
+import time
 from tenacity import RetryError
 from app.agent.llm import llm
 from app.agent.state import AgentState
@@ -7,6 +8,7 @@ from app.security.sanitizers import (
     check_for_injection,
     validate_input_length,
 )
+from app.logging_config import logger
 
 
 @with_llm_retry(max_attempts=3)
@@ -16,9 +18,14 @@ def _prioritize_llm_call(prompt: str):
 
 def prioritize_ticket(state: AgentState) -> dict:
     """Определяет приоритет заявки."""
+    start_time = time.time()
+    thread_id = state.thread_id
+    logger.debug(f"[{thread_id}] Начало приоритезации")
+
     # 1. Проверка длины ввода
     is_valid, error_msg = validate_input_length(state.user_input)
     if not is_valid:
+        logger.warning(f"[{thread_id}] Превышена длина ввода: {error_msg}")
         return AgentState(
             thread_id=state.thread_id,
             user_input=state.user_input,
@@ -30,6 +37,7 @@ def prioritize_ticket(state: AgentState) -> dict:
 
     # 2. Проверка на prompt injection
     if check_for_injection(state.user_input):
+        logger.warning(f"[{thread_id}] Обнаружен prompt injection")
         return AgentState(
             thread_id=state.thread_id,
             user_input=state.user_input,
@@ -69,8 +77,18 @@ def prioritize_ticket(state: AgentState) -> dict:
 
         valid_priorities = {"critical", "high", "medium", "low"}
         if priority not in valid_priorities:
+            logger.warning(f"[{thread_id}] Невалидный приоритет от LLM: {priority}")
             priority = "medium"
 
+        elapsed = time.time() - start_time
+        logger.info(
+            f"[{thread_id}] Приоритезация завершена: {priority}",
+            extra={
+                "thread_id": thread_id,
+                "priority": priority,
+                "elapsed_ms": round(elapsed * 1000, 2),
+            },
+        )
         return AgentState(
             thread_id=state.thread_id,
             user_input=state.user_input,
@@ -79,7 +97,16 @@ def prioritize_ticket(state: AgentState) -> dict:
             reasoning=f"{state.reasoning or ''} | Приоритет: {priority}".strip(" |"),
         ).to_dict()
 
-    except RetryError:
+    except RetryError as e:
+        elapsed = time.time() - start_time
+        logger.error(
+            f"[{thread_id}] Исчерпаны попытки приоритезации",
+            extra={
+                "thread_id": thread_id,
+                "error": str(e),
+                "elapsed_ms": round(elapsed * 1000, 2),
+            },
+        )
         return AgentState(
             thread_id=state.thread_id,
             user_input=state.user_input,
@@ -92,6 +119,15 @@ def prioritize_ticket(state: AgentState) -> dict:
         ).to_dict()
 
     except Exception as e:
+        elapsed = time.time() - start_time
+        logger.exception(
+            f"[{thread_id}] Неожиданная ошибка приоритезации",
+            extra={
+                "thread_id": thread_id,
+                "error": str(e),
+                "elapsed_ms": round(elapsed * 1000, 2),
+            },
+        )
         return AgentState(
             thread_id=state.thread_id,
             user_input=state.user_input,

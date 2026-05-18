@@ -1,19 +1,25 @@
+import time
 from langgraph.config import RunnableConfig
 from app.agent.state import AgentState
 from app.crud import ticket as ticket_crud
 from app.api.schemas.ticket import TicketCreate
+from app.logging_config import logger
 
 
 async def save_ticket(state: AgentState, config: RunnableConfig) -> dict:
     """
     Сохраняет обработанную заявку в базу данных.
-
     Сессия БД извлекается из config["configurable"].
     """
+    start_time = time.time()
+    thread_id = state.thread_id
+    logger.debug(f"[{thread_id}] Начало сохранения заявки")
+
     # Извлекаем сессию из конфигурации
     session = config["configurable"].get("session")
 
     if not session:
+        logger.error(f"[{thread_id}] БД не подключена")
         return AgentState(
             thread_id=state.thread_id,
             user_input=state.user_input,
@@ -42,7 +48,15 @@ async def save_ticket(state: AgentState, config: RunnableConfig) -> dict:
             event_type="agent_processed",
             new_value=state.reasoning,
         )
-
+        elapsed = time.time() - start_time
+        logger.info(
+            f"[{thread_id}] Заявка id={db_ticket.id} сохранена в БД",
+            extra={
+                "thread_id": thread_id,
+                "ticket_id": str(db_ticket.id),
+                "elapsed_ms": round(elapsed * 1000, 2),
+            },
+        )
         return AgentState(
             thread_id=state.thread_id,
             user_input=state.user_input,
@@ -57,6 +71,15 @@ async def save_ticket(state: AgentState, config: RunnableConfig) -> dict:
         ).to_dict()
 
     except Exception as e:
+        elapsed = time.time() - start_time
+        logger.exception(
+            f"[{thread_id}] Неожиданная ошибка сохранения заявки",
+            extra={
+                "thread_id": thread_id,
+                "error": str(e),
+                "elapsed_ms": round(elapsed * 1000, 2),
+            },
+        )
         return AgentState(
             thread_id=state.thread_id,
             user_input=state.user_input,
