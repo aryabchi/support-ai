@@ -1,0 +1,77 @@
+services:
+  # Наше приложение
+  app:
+    build: .
+    container_name: support-ai-app
+    ports:
+      - "8080:8080"  # Машина:Контейнер
+    env_file: .env
+    depends_on:
+      db:
+        condition: service_healthy  # Ждем, пока БД будет готова
+    #   ollama:
+    #     condition: service_healthy  # Ждем пока ollama будет готова
+    restart: unless-stopped  # Перезапускать при падении, но не после ручной остановки
+    # Сначала миграции, потом запуск приложения
+    command: >
+      sh -c "
+        echo 'Running Alembic migrations...' &&
+        alembic upgrade head &&
+        echo 'Migrations complete, starting app...' &&
+        exec uvicorn app.main:app --host 0.0.0.0 --port 8080 --workers 2 --log-level info
+      "
+    networks:
+      - support-ai-net
+
+  # PostgreSQL для хранения заявок и чекпоинтов
+  db:
+    image: postgres:18-alpine
+    container_name: support-ai-db
+    environment:
+      POSTGRES_USER: support
+      POSTGRES_PASSWORD: support_pass
+      POSTGRES_DB: support_db
+    volumes:
+      - postgres-data:/var/lib/postgresql  # Сохраняем данные между перезапусками
+    ports:
+      - "5432:5432"  # Опционально: доступ к БД с хоста для отладки
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U support -d support_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - support-ai-net
+
+  # ollama:
+  #   image: ollama/ollama:latest
+  #   container_name: support-ai-ollama
+  #   volumes:
+  #     - ollama-data:/root/.ollama  # Сохраняем скачанные модели
+  #   ports:
+  #     - "11435:11434"
+  #   entrypoint: ["/bin/sh", "-c"]
+  #   # Команда для автозагрузки модели (опционально)
+  #   command:
+  #     - "ollama serve && ollama pull llama3.1:latest"
+  #   # Healthcheck для проверки готовности API
+  #   healthcheck:
+  #     test: ["CMD", "ollama", "list"]
+  #     interval: 10s
+  #     timeout: 10s
+  #     retries: 10
+  #     start_period: 180s  # 3 минуты на скачивание модели
+  #   deploy:
+  #     resources:
+  #       limits:
+  #         memory: 6G  # Ограничиваем память, чтобы не съел всё
+  #   networks:
+  #     - support-ai-net
+
+volumes:
+  postgres-data:  # Именованный том для БД
+  # ollama-data:    # Именованный том для моделей Ollama
+
+networks:
+  support-ai-net:  # Изолированная сеть для сервисов
+    driver: bridge

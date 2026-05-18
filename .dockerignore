@@ -1,0 +1,44 @@
+# Виртуальное окружение (не нужно в образе)
+.venv/
+venv/
+env/
+
+# Кэш Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Тесты и отладка
+.pytest_cache/
+.coverage
+htmlcov/
+*.log
+
+# IDE и редакторы
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Git
+.git/
+.gitignore
+
+# Документация (не нужна в рантайме)
+docs/
+*.md
+README*
+
+# Пример секретов секреты
+.env.example
+
+# Артефакты сборки
+dist/
+build/
+*.egg-info/
+
+# Тестовые данные
+tests/data/
+*.db
+*.sqlite3
