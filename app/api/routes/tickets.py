@@ -1,3 +1,4 @@
+import time
 from sqlalchemy.ext.asyncio import AsyncSession
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 
@@ -13,6 +14,7 @@ from app.api.schemas.ticket import (
 from app.core.dependencies import get_agent_graph, get_telegram_client_context
 from app.agent.checkpointer import get_checkpointer
 from app.agent.state import AgentState
+from app.logging_config import logger
 
 router = APIRouter(prefix="/tickets", tags=["tickets"])
 
@@ -24,6 +26,11 @@ async def create_ticket_endpoint(
     settings: Settings = Depends(get_settings),
 ) -> TicketResponse:
     """Создаёт заявку с обработкой через агента."""
+
+    start_time = time.time()
+    thread_id = ticket_in.thread_id
+    logger.info(f"[{thread_id}] Получен запрос на создание заявки")
+
     db_url = str(settings.DATABASE_URL)
 
     graph_builder = get_agent_graph()
@@ -52,13 +59,43 @@ async def create_ticket_endpoint(
 
     if result_state.get("error") and ("alert_failed" not in result_state["error"]):
         # Ok if error is connected with alerting ("alert_failed")
+        elapsed = time.time() - start_time
+        logger.error(
+            f"[{thread_id}] Ошибка агента: {result_state['error']}",
+            extra={
+                "thread_id": thread_id,
+                "error": result_state["error"],
+                "elapsed_ms": round(elapsed * 1000, 2),
+            },
+        )
         raise HTTPException(status_code=500, detail=result_state["error"])
 
     # Получаем уже сохранённую заявку по id от агента
     if not result_state.get("ticket_id"):
+        elapsed = time.time() - start_time
+        logger.error(
+            f"[{thread_id}] Агент не вернул ticket_id",
+            extra={
+                "thread_id": thread_id,
+                "elapsed_ms": round(elapsed * 1000, 2),
+            },
+        )
         raise HTTPException(status_code=500, detail="Agent did not return ticket_id")
 
+    # Получаем сохранённую заявку
     db_ticket = await ticket_crud.get_ticket_by_id(db, result_state["ticket_id"])
+    elapsed = time.time() - start_time
+    logger.info(
+        f"[{thread_id}] Заявка создана: id={db_ticket.id}",
+        extra={
+            "thread_id": thread_id,
+            "ticket_id": db_ticket.id,
+            "category": db_ticket.category,
+            "priority": db_ticket.priority,
+            "tags_count": len(db_ticket.tags) if db_ticket.tags else 0,
+            "elapsed_ms": round(elapsed * 1000, 2),
+        },
+    )
     return TicketResponse.model_validate(db_ticket)
 
 
@@ -67,14 +104,32 @@ async def get_ticket_endpoint(
     ticket_id: int, db: AsyncSession = Depends(get_db_session)
 ) -> TicketResponse:
     """Получает заявку по id."""
+    start_time = time.time()
+    logger.debug(f"Получен запрос на получение заявки: id={ticket_id}")
+
     db_ticket = await ticket_crud.get_ticket_by_id(db, ticket_id)
 
     if not db_ticket:
+        elapsed = time.time() - start_time
+        logger.warning(
+            f"Заявка не найдена: id={ticket_id}",
+            extra={
+                "ticket_id": ticket_id,
+                "elapsed_ms": round(elapsed * 1000, 2),
+            },
+        )
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Заявка с id={ticket_id} не найдена",
         )
-
+    elapsed = time.time() - start_time
+    logger.debug(
+        f"Заявка получена: id={ticket_id}",
+        extra={
+            "ticket_id": ticket_id,
+            "elapsed_ms": round(elapsed * 1000, 2),
+        },
+    )
     return TicketResponse.model_validate(db_ticket)
 
 
@@ -94,8 +149,24 @@ async def list_tickets_endpoint(
     - **skip**: смещение для пагинации (по умолчанию 0)
     - **limit**: число записей на странице (1-1000, по умолчанию 100)
     """
-    tickets, total = await ticket_crud.get_tickets_by_thread(db, thread_id, skip, limit)
+    start_time = time.time()
+    logger.debug(
+        f"Получен запрос на список заявок: thread_id={thread_id}, skip={skip}, limit={limit}"
+    )
 
+    tickets, total = await ticket_crud.get_tickets_by_thread(db, thread_id, skip, limit)
+    elapsed = time.time() - start_time
+    logger.debug(
+        f"Список заявок получен: {len(tickets)} из {total}",
+        extra={
+            "thread_id": thread_id,
+            "returned": len(tickets),
+            "total": total,
+            "skip": skip,
+            "limit": limit,
+            "elapsed_ms": round(elapsed * 1000, 2),
+        },
+    )
     return TicketListResponse(
         items=[TicketResponse.model_validate(t) for t in tickets],
         total=total,
@@ -111,14 +182,34 @@ async def update_ticket_endpoint(
     db: AsyncSession = Depends(get_db_session),
 ) -> TicketResponse:
     """Частично обновляет заявку по id."""
+    start_time = time.time()
+    logger.debug(f"Получен запрос на обновление заявки: id={ticket_id}")
+
     db_ticket = await ticket_crud.update_ticket(db, ticket_id, ticket_update)
 
     if not db_ticket:
+        elapsed = time.time() - start_time
+        logger.warning(
+            f"Заявка не найдена для обновления: id={ticket_id}",
+            extra={
+                "ticket_id": ticket_id,
+                "elapsed_ms": round(elapsed * 1000, 2),
+            },
+        )
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Заявка с id={ticket_id} не найдена",
         )
 
+    elapsed = time.time() - start_time
+    logger.info(
+        f"Заявка обновлена: id={ticket_id}",
+        extra={
+            "ticket_id": ticket_id,
+            "updated_fields": ticket_update.model_dump(exclude_unset=True).keys(),
+            "elapsed_ms": round(elapsed * 1000, 2),
+        },
+    )
     return TicketResponse.model_validate(db_ticket)
 
 
@@ -127,12 +218,32 @@ async def delete_ticket_endpoint(
     ticket_id: int, db: AsyncSession = Depends(get_db_session)
 ) -> None:
     """Удаляет заявку по id. Возвращает 204 без тела ответа."""
+    start_time = time.time()
+    logger.debug(f"Получен запрос на удаление заявки: id={ticket_id}")
+
     success = await ticket_crud.delete_ticket(db, ticket_id)
 
     if not success:
+        elapsed = time.time() - start_time
+        logger.warning(
+            f"Заявка не найдена для удаления: id={ticket_id}",
+            extra={
+                "ticket_id": ticket_id,
+                "elapsed_ms": round(elapsed * 1000, 2),
+            },
+        )
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Заявка с id={ticket_id} не найдена",
         )
+
+    elapsed = time.time() - start_time
+    logger.info(
+        f"Заявка удалена: id={ticket_id}",
+        extra={
+            "ticket_id": ticket_id,
+            "elapsed_ms": round(elapsed * 1000, 2),
+        },
+    )
 
     return None
