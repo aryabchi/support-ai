@@ -1,26 +1,27 @@
-# support-ai
-AI Assistant for Support Service
+# Support Service AI Agent 
+LangGraph App for Support Service
 
-# Description
-**TBD**
+# Core business use-case
+User submits incident via web request -> Agent classifies incident, sets priority and tags -> (If "critical") Sends alert -> (Otherwise) Saves incident to database -> App saves Agent state and sends web response
 
 # Tech Stack
 
-- LangGraph (agents orchestration)
-- FastAPI (endpoints)
+- LangGraph (tasks orchestration)
+- FastAPI (REST API endpoints)
 - Ollama (LLMs)
-- PostgreSQL (state persistence) 
+- PostgreSQL (state persistence and datastore) 
 
 # Features
 
 - Agent graph with LLM and deterministic nodes and conditional edges
 - Agent state persistence (AsyncPostgresSaver checkpointer)
+- FastAPI endpoints for http agent invocations
+- Healthcheck endpoints
 - Input pydantic validation and sanitization
-- Logging and LangSmith tracing
-- Retry/fallback logic
-- FastAPI endpoints
-- Data models in SQLAlchemy
-- Docker containers with App and db (Ollama models on localhost) 
+- JSON logging and LangSmith tracing
+- Retry/fallback logic on LLM calls 
+- Data models in SQLAlchemy with Alembic migrations 
+- Docker containers with App and Postgres storage (Ollama is NOT containerized) 
 
 # Dependencies
 
