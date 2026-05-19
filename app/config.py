@@ -10,18 +10,6 @@ from pydantic import (
     AnyHttpUrl,
 )
 
-# custom csv parser func
-# def parse_comma_separated(v: Any) -> list[str]:
-#     if isinstance(v, str):
-#         return [item.strip() for item in v.split(",")]
-#     return v
-
-
-# custom annotation for csv env vars
-# CommaSeparatedList = Annotated[
-#     list[str], NoDecode, BeforeValidator(parse_comma_separated)
-# ]
-
 
 class Settings(BaseSettings):
     """
