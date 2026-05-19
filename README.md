@@ -2,7 +2,7 @@
 LangGraph App for Support Service
 
 # Core business use-case
-User submits incident via web request -> Agent classifies incident, sets priority and tags -> (If "critical") Sends alert -> (Otherwise) Saves incident to database -> App saves Agent state and sends web response
+User submits incident via web request => Agent classifies incident, sets priority and tags => (If "critical") Sends alert => (Otherwise) Saves incident to database => App saves Agent state and sends web response
 
 # Tech Stack
 
@@ -10,6 +10,7 @@ User submits incident via web request -> Agent classifies incident, sets priorit
 - FastAPI (REST API endpoints)
 - Ollama (LLMs)
 - PostgreSQL (state persistence and datastore) 
+- Docker (app containerization)
 
 # Features
 
@@ -22,11 +23,12 @@ User submits incident via web request -> Agent classifies incident, sets priorit
 - Retry/fallback logic on LLM calls 
 - Data models in SQLAlchemy with Alembic migrations 
 - Docker containers with App and Postgres storage (Ollama is NOT containerized) 
+- Tests
 
 # Dependencies
 
 - Python 3.11.9
-- requirements.txt
+- see `requirements.txt`
 - llama3.1:latest
 
 ```
