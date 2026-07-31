@@ -1,9 +1,10 @@
 import time
+
 import httpx
-from langgraph.config import RunnableConfig
-from app.config import get_settings
 from app.agent.state import AgentState
+from app.config import get_settings
 from app.logging_config import logger
+from langgraph.config import RunnableConfig
 
 
 async def send_critical_alert(state: AgentState, config: RunnableConfig) -> dict:
@@ -34,15 +35,16 @@ async def send_critical_alert(state: AgentState, config: RunnableConfig) -> dict
             reasoning=f"{state.reasoning or ''} | Алерт не отправлен".strip(" |"),
         ).to_dict()
 
-    message = f"""*Критичная заявка*
+    message = f"""*Заявка требует внимания*
 
 *Категория:* {state.category or "не определена"}
-*Приоритет:* {state.priority}
+*Приоритет:* {state.priority.upper()}
 *Текст:* {state.user_input[:200]}{'...' if len(state.user_input) > 200 else ''}
 *Теги:* {', '.join(state.tags) if state.tags else 'нет'}
 *Сессия:* `{state.thread_id}`
 
-{state.reasoning or ''}"""
+{state.reasoning or ''}
+"""
 
     try:
         response = await telegram_client.post(

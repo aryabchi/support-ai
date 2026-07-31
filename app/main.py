@@ -1,11 +1,11 @@
-from fastapi import FastAPI
-from sqlalchemy import select
 from contextlib import asynccontextmanager
-from fastapi.middleware.cors import CORSMiddleware
 
+from app.api.routes import health, tickets
 from app.config import get_settings
-from app.api.routes import tickets, health
 from app.db.session import get_engine
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy import select
 
 
 # Lifespan context manager для инициализации/очистки при старте/остановке

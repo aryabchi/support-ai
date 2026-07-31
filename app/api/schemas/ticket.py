@@ -83,3 +83,33 @@ class TicketListResponse(BaseModel):
     total: int
     page: int
     page_size: int
+
+
+# === Схемы для подтверждения заявки (HIL) ===
+
+
+class ConfirmRequest(BaseModel):
+    """Запрос на подтверждение/отклонение заявки по thread_id."""
+
+    thread_id: str = Field(
+        ...,
+        min_length=1,
+        max_length=64,
+        description="Идентификатор сессии (тот же, что при POST /tickets/)",
+    )
+    decision: str = Field(
+        ...,
+        pattern="^(yes|no)$",
+        description="Решение пользователя: 'yes' для подтверждения, 'no' для отмены",
+    )
+
+
+class ConfirmResponse(BaseModel):
+    """Ответ после подтверждения заявки."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    ticket_id: int
+    confirmed: bool
+    status: str
+    message: str | None = None
