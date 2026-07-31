@@ -1,5 +1,6 @@
 from typing import Literal
-from pydantic import BaseModel, Field, ConfigDict
+
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class AgentState(BaseModel):
@@ -21,6 +22,11 @@ class AgentState(BaseModel):
     done: bool = False
     alert_sent: bool = False
 
+    # === Поля для HIL (defaults for backward compat) ===
+    requires_approval: bool = False  # Требуется ли подтверждение
+    confirmed: bool | None = None  # Результат подтверждения
+    confirmation_message: str | None = None  # Сообщение прерывания
+
     # === Обработка ошибок ===
     error: str | None = None
 
@@ -34,3 +40,11 @@ class AgentState(BaseModel):
     def needs_alert(self) -> bool:
         """Проверяет, нужно ли отправить Telegram-алерт."""
         return self.priority == "critical" and not self.alert_sent
+
+    def needs_confirmation(self) -> bool:
+        """Проверяет, нужно ли запросить подтверждение пользователя."""
+        return (
+            self.priority == "high"
+            and self.requires_approval
+            and self.confirmed is None
+        )

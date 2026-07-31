@@ -1,20 +1,24 @@
 import time
-from sqlalchemy.ext.asyncio import AsyncSession
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from datetime import datetime, timezone
 
-from app.db.session import get_db_session
-from app.config import get_settings, Settings
-from app.crud import ticket as ticket_crud
-from app.api.schemas.ticket import (
-    TicketCreate,
-    TicketUpdate,
-    TicketResponse,
-    TicketListResponse,
-)
-from app.core.dependencies import get_agent_graph, get_telegram_client_context
 from app.agent.checkpointer import get_checkpointer
 from app.agent.state import AgentState
+from app.api.schemas.ticket import (
+    ConfirmRequest,
+    ConfirmResponse,
+    TicketCreate,
+    TicketListResponse,
+    TicketResponse,
+    TicketUpdate,
+)
+from app.config import Settings, get_settings
+from app.core.dependencies import get_agent_graph, get_telegram_client_context
+from app.crud import ticket as ticket_crud
+from app.db.session import get_db_session
 from app.logging_config import logger
+from fastapi import APIRouter, Depends, HTTPException, Query, status
+from langgraph.types import Command
+from sqlalchemy.ext.asyncio import AsyncSession
 
 router = APIRouter(prefix="/tickets", tags=["tickets"])
 
@@ -57,7 +61,27 @@ async def create_ticket_endpoint(
             },
         )
 
-    if result_state.get("error") and ("alert_failed" not in result_state["error"]):
+    if "__interrupt__" in result_state:
+        # Заявка ждёт подтверждения — возвращаем специальный статус
+        elapsed = time.time() - start_time
+        logger.info(f"[{thread_id}] Заявка ожидает подтверждения пользователя")
+        return TicketResponse(
+            id=0,
+            thread_id=thread_id,
+            user_input=ticket_in.user_input,
+            category=result_state.get("category"),
+            priority=result_state.get("priority"),
+            tags=result_state.get("tags"),
+            status="awaiting_confirmation",
+            created_at=datetime.now(timezone.utc),
+            updated_at=datetime.now(timezone.utc),
+        )
+
+    if (
+        result_state.get("error")
+        and ("alert_failed" not in result_state["error"])
+        and not result_state.get("ticket_id")
+    ):
         # Ok if error is connected with alerting ("alert_failed")
         elapsed = time.time() - start_time
         logger.error(
@@ -247,3 +271,60 @@ async def delete_ticket_endpoint(
     )
 
     return None
+
+
+@router.post(
+    "/confirm",
+    response_model=ConfirmResponse,
+    description="Возобновление графа HIL /*Command(resume=decision)*/",
+)
+async def confirm_ticket_by_thread(
+    request: ConfirmRequest,
+    db: AsyncSession = Depends(get_db_session),
+) -> ConfirmResponse:
+    """Возобновляет обработку заявки с решением пользователя по thread_id."""
+    settings = get_settings()
+    db_url = str(settings.DATABASE_URL)
+    thread_id = request.thread_id
+
+    logger.info(f"[{thread_id}] Получен запрос на подтверждение заявки")
+
+    async with get_checkpointer(db_url) as checkpointer:
+        graph = get_agent_graph()(checkpointer=checkpointer)
+        snapshot = await graph.aget_state({"configurable": {"thread_id": thread_id}})
+
+        if not snapshot.interrupts:
+            if not snapshot.values:
+                raise HTTPException(status_code=404, detail="Сессия не найдена")
+            raise HTTPException(
+                status_code=400,
+                detail="Нет ожидающего подтверждения для этой сессии",
+            )
+
+        async with get_telegram_client_context() as telegram_client:
+            result = await graph.ainvoke(
+                Command(resume=request.decision),
+                config={
+                    "configurable": {
+                        "thread_id": thread_id,
+                        "session": db,
+                        "telegram_client": telegram_client,
+                    }
+                },
+            )
+
+    confirmed = result.get("confirmed", False)
+    ticket_id = result.get("ticket_id") or 0
+
+    if confirmed and ticket_id:
+        db_ticket = await ticket_crud.get_ticket_by_id(db, ticket_id)
+        ticket_status = db_ticket.status.value
+    else:
+        ticket_status = "rejected"
+
+    return ConfirmResponse(
+        ticket_id=ticket_id,
+        confirmed=confirmed,
+        status=ticket_status,
+        message=result.get("confirmation_message"),
+    )

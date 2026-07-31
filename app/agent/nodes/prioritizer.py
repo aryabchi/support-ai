@@ -1,14 +1,15 @@
 import time
-from tenacity import RetryError
+
 from app.agent.llm import llm
-from app.agent.state import AgentState
 from app.agent.retry import with_llm_retry
+from app.agent.state import AgentState
+from app.logging_config import logger
 from app.security.sanitizers import (
-    sanitize_input,
     check_for_injection,
+    sanitize_input,
     validate_input_length,
 )
-from app.logging_config import logger
+from tenacity import RetryError
 
 
 @with_llm_retry(max_attempts=3)
@@ -80,6 +81,27 @@ def prioritize_ticket(state: AgentState) -> dict:
             logger.warning(f"[{thread_id}] Невалидный приоритет от LLM: {priority}")
             priority = "medium"
 
+        # Ключевые слова, требующие подтверждения перед действием
+        sensitive_keywords = [
+            "удалить",
+            "сбросить",
+            "изменить пароль",
+            "отменить",
+            "вернуть деньги",
+            "refund",
+            "delete",
+            "reset",
+        ]
+        user_input_lower = state.user_input.lower()
+        requires_approval = any(kw in user_input_lower for kw in sensitive_keywords)
+        if requires_approval:
+            if priority in ("low", "medium"):
+                priority = "high"
+            logger.info(
+                f"[{thread_id}] Заявка требует подтверждения: "
+                f"найдены чувствительные ключевые слова"
+            )
+
         elapsed = time.time() - start_time
         logger.info(
             f"[{thread_id}] Приоритезация завершена: {priority}",
@@ -95,6 +117,7 @@ def prioritize_ticket(state: AgentState) -> dict:
             category=state.category,
             priority=priority,
             reasoning=f"{state.reasoning or ''} | Приоритет: {priority}".strip(" |"),
+            requires_approval=requires_approval,
         ).to_dict()
 
     except RetryError as e:
