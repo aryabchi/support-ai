@@ -1,8 +1,36 @@
 # Support Service AI Agent 
+
 LangGraph App for Support Service
 
-# Core business use-case
-User submits incident via web request => Agent classifies incident, sets priority and tags => (If "critical") Sends alert => (Otherwise) Saves incident to database => App saves Agent state and sends web response
+# Core Business Use-Case
+
+User submits incident via web request --> Agent classifies incident, sets priority and tags --> (If `critical` or `high` + `requires_approval`) Sends TG alert (currently disabled) --> (Otherwise or after HIL confirmation) Saves incident to database --> App saves Agent state and sends web response
+
+# Agent Graph Flow
+
+```mermaid
+flowchart TD
+    START([START]) --> classifier[classifier<br/>classify_ticket]
+    classifier --> prioritizer[prioritizer<br/>prioritize_ticket]
+    prioritizer --> tagger[tagger<br/>tag_ticket]
+
+    tagger -->|route_after_tagger| R1{needs_alert?}
+    R1 -->|yes| alert[alert<br/>send_critical_alert]
+    R1 -->|no| R2{needs_confirmation?}
+    R2 -->|yes| alert
+    R2 -->|no| saver
+
+    alert -->|route_after_alert| R3{needs_confirmation?}
+    R3 -->|yes| confirmation[confirmation<br/>confirmation_node]
+    R3 -->|no| saver[saver<br/>save_ticket]
+
+    confirmation -->|route_after_confirmation| R4{confirmed is False?}
+    R4 -->|yes / rejected| endNode[end<br/>done=True]
+    R4 -->|no / approved| saver
+
+    saver --> END([END])
+    endNode --> END
+```
 
 # Tech Stack
 
@@ -14,7 +42,8 @@ User submits incident via web request => Agent classifies incident, sets priorit
 
 # Features
 
-- Agent graph with LLM and deterministic nodes and conditional edges
+- Agent graph with LLM and deterministic nodes + conditional edges
+- Human-in-the-Loop
 - Agent state persistence (AsyncPostgresSaver checkpointer)
 - FastAPI endpoints for http agent invocations
 - Healthcheck endpoints
@@ -37,66 +66,73 @@ ollama pull llama3.1:latest
 
 - postgres:18-alpine via Docker
 
+
+# Run the app locally
+
+* In `.env` change
+
+```python
+DATABASE_URL=postgresql+asyncpg://support:support_pass@localhost:5432/support_db
+# DATABASE_URL=postgresql+asyncpg://support:support_pass@db:5432/support_db
+
+DB_HOST=localhost
+# DB_HOST=db
+
+OLLAMA_BASE_URL=http://localhost:11434
+# OLLAMA_BASE_URL=http://host.docker.internal:11434
 ```
-docker run -d --name support-ai-db -e POSTGRES_USER=<your_user_name> -e POSTGRES_PASSWORD=<your_user_pass> -e POSTGRES_DB=support_db -p 5432:5432 -v postgres-data:/var/lib/postgresql postgres:18-alpine
+
+* Ensure Ollama service is running and `llama3.1:latest` is loaded
+
+* Then run
 ```
+docker run -d --name support-ai-db -e POSTGRES_USER=support -e POSTGRES_PASSWORD=support_pass -e POSTGRES_DB=support_db -p 5432:5432 -v postgres-data:/var/lib/postgresql postgres:18-alpine
+```
+
+```bash
+uvicorn app.main:app --port 8080
+```
+
 
 # Try it out
 
-Sample request #1
-```curl -X 'POST' \
-  'http://localhost:8080/tickets/' \
-  -H 'accept: application/json' \
-  -H 'Content-Type: application/json' \
-  -d '{"thread_id": "docker_test_001", "user_input": "Не работает вход в систему"}'
+HIL request (`high` + `requires_approval`)
+```bash
+curl -X POST "http://localhost:8080/tickets/" -H "Content-Type: application/json" -d "{\`"thread_id\`": \`"user_hil_002\`", \`"user_input\`": \`"Хочу удалить свой аккаунт\`"}"  
+```
+Response
+```
+{"thread_id":"user_hil_002","user_input":"Хочу удалить свой аккаунт","category":"other","priority":"high","tags":["feature","access"],"status":"awaiting_confirmation","id":0,"created_at":"2026-07-31T17:43:09.956856Z","updated_at":"2026-07-31T17:43:09.956856Z"}
 ```
 
-Expected response
+User confirms action
 
+```bash
+curl -X POST "http://localhost:8080/tickets/confirm" -H "Content-Type: application/json" -d "{\`"thread_id\`": \`"user_hil_002\`", \`"decision\`": \`"yes\`"}
 ```
-{
-  "thread_id": "docker_test_001",
-  "user_input": "Не работает вход в систему",
-  "category": "technical",
-  "priority": "high",
-  "tags": [
-    "login",
-    "error",
-    "bug"
-  ],
-  "status": "new",
-  "id": 1,
-  "created_at": "2026-05-18T20:00:20.405998Z",
-  "updated_at": "2026-05-18T20:00:20.405998Z"
-}
+Response
+```
+{"ticket_id":6,"confirmed":true,"status":"in_progress","message":null}
 ```
 
-Sample request #2
-
-```
-curl -X 'POST' \
-  'http://localhost:8080/tickets/' \
-  -H 'accept: application/json' \
-  -H 'Content-Type: application/json' \
-  -d '{"thread_id": "docker_test_critical_002", "user_input": "Система не работает, данные пропали, пользовали не могут войти, логи не читаются"}'
+Check status
+```bash
+curl http://localhost:8080/tickets/6
 ```
 
-Expected response
-
+Response
 ```
-{
-  "thread_id": "docker_test_critical_002",
-  "user_input": "Система не работает, данные пропали, пользовали не могут войти, логи не читаются",
-  "category": "technical",
-  "priority": "critical",
-  "tags": [
-    "error",
-    "crash",
-    "bug"
-  ],
-  "status": "new",
-  "id": 2,
-  "created_at": "2026-05-18T20:08:05.491351Z",
-  "updated_at": "2026-05-18T20:08:05.491351Z"
-}
+{"thread_id":"user_hil_002","user_input":"Хочу удалить свой аккаунт","category":"other","priority":"high","tags":["feature","access"],"status":"in_progress","id":6,"created_at":"2026-07-31T17:43:37.899160Z","updated_at":"2026-07-31T17:43:37.899160Z"}
+```
+
+Not HIL request (`critical`)
+
+```bash
+curl -X POST "http://localhost:8080/tickets/" -H "Content-Type: application/json" -d 
+"{\`"thread_id\`": \`"user_crit_001\`", \`"user_input\`": \`"Все упало, ничего не работает, пользователи не могут войти\`"}"
+```
+
+Response
+```
+{"thread_id":"user_crit_001","user_input":"Все упало, ничего не работает, пользователи не могут войти","category":"technical","priority":"critical","tags":["login","error","crash"],"status":"in_progress","id":7,"created_at":"2026-07-31T17:51:36.708119Z","updated_at":"2026-07-31T17:51:36.708119Z"}
 ```

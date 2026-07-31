@@ -26,16 +26,21 @@ def get_telegram_client():
 async def get_telegram_client_context():
     """
     Context manager для Telegram-клиента.
-    Гарантирует закрытие клиента после использования.
+
+    Создаёт новый httpx.AsyncClient на каждый запрос и закрывает его после использования.
     """
-    client = get_telegram_client()
-    if client:
-        try:
-            yield client
-        finally:
-            await client.aclose()
-    else:
+    settings = get_settings()
+
+    if not settings.TELEGRAM_BOT_TOKEN:
         yield None
+        return
+
+    base_url = f"https://api.telegram.org/bot{settings.TELEGRAM_BOT_TOKEN}"
+    async with httpx.AsyncClient(
+        base_url=base_url,
+        timeout=httpx.Timeout(10.0, connect=5.0),
+    ) as client:
+        yield client
 
 
 @lru_cache
