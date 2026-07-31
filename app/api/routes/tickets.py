@@ -328,3 +328,34 @@ async def confirm_ticket_by_thread(
         status=ticket_status,
         message=result.get("confirmation_message"),
     )
+
+
+@router.delete(
+    "/{thread_id}/confirm",
+    status_code=status.HTTP_204_NO_CONTENT,
+    description="Отмена подтверждения и очистка чекпоинта по thread_id",
+)
+async def cancel_ticket_confirmation_endpoint(
+    thread_id: str,
+    settings: Settings = Depends(get_settings),
+) -> None:
+    """Отменяет ожидающее подтверждение, удаляя чекпоинт сессии."""
+    db_url = str(settings.DATABASE_URL)
+    logger.info(f"[{thread_id}] Получен запрос на отмену подтверждения")
+
+    async with get_checkpointer(db_url) as checkpointer:
+        graph = get_agent_graph()(checkpointer=checkpointer)
+        snapshot = await graph.aget_state({"configurable": {"thread_id": thread_id}})
+
+        if not snapshot.values:
+            raise HTTPException(status_code=404, detail="Сессия не найдена")
+        if not snapshot.interrupts:
+            raise HTTPException(
+                status_code=400,
+                detail="Нет ожидающего подтверждения для этой сессии",
+            )
+
+        await checkpointer.adelete_thread(thread_id)
+
+    logger.info(f"[{thread_id}] Чекпоинт сессии удалён")
+    return None
