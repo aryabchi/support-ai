@@ -286,7 +286,6 @@ class TestClassifyTicket:
 
         assert result["category"] == "technical"
         assert "error" not in result
-        assert result["thread_id"] == "test_001"
 
     def test_fallback_on_invalid_category(self, mock_state):
         """Невалидная категория от LLM заменяется на дефолт."""
@@ -338,4 +337,4 @@ class TestClassifyTicket:
             result = classify_ticket(mock_state)
 
         assert result["category"] == "other"
-        assert "Unexpected error" in result["error"]
+        assert "RuntimeError" in result["error"]

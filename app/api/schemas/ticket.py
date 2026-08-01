@@ -72,6 +72,34 @@ class TicketResponse(TicketBase):
     id: int
     created_at: datetime
     updated_at: datetime
+    last_response: str | None = None
+    messages_count: int | None = None
+
+
+# === Схемы для истории диалога ===
+
+
+class ChatMessage(BaseModel):
+    """Сообщение пользователя в рамках диалога."""
+
+    content: str = Field(
+        ...,
+        min_length=1,
+        max_length=1000,
+        description="Текст сообщения (1-1000 символов)",
+    )
+
+
+class ChatResponse(BaseModel):
+    """Ответ API для многошагового диалога."""
+
+    thread_id: str
+    messages: list[dict]
+    last_response: str | None = None
+    done: bool = False
+    ticket_id: int | None = None
+    category: str | None = None
+    priority: str | None = None
 
 
 class TicketListResponse(BaseModel):
