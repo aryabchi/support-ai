@@ -1,4 +1,5 @@
-from typing import Literal
+import operator
+from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -12,6 +13,10 @@ class AgentState(BaseModel):
     thread_id: str = Field(..., min_length=1)
     user_input: str = Field(..., min_length=1)
 
+    # === История диалога ===
+    messages: Annotated[list[dict], operator.add] = Field(default_factory=list)
+    last_response: str | None = None
+
     # === Результаты обработки ===
     category: Literal["technical", "billing", "feature", "other"] | None = None
     priority: Literal["low", "medium", "high", "critical"] | None = None
@@ -19,7 +24,8 @@ class AgentState(BaseModel):
     reasoning: str | None = None
 
     # === Управление потоком ===
-    done: bool = False
+    done: bool = False  # Обработка заявки агентом завершена (saver)
+    dialog_closed: bool = False  # Диалог завершён пользователем (chat_handler)
     alert_sent: bool = False
 
     # === Поля для HIL (defaults for backward compat) ===
@@ -48,3 +54,8 @@ class AgentState(BaseModel):
             and self.requires_approval
             and self.confirmed is None
         )
+
+    def get_last_user_message(self) -> str | None:
+        """Возвращает последнее сообщение пользователя из истории."""
+        user_msgs = [m for m in self.messages if m.get("role") == "user"]
+        return user_msgs[-1].get("content") if user_msgs else None
