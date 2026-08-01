@@ -1,11 +1,10 @@
 import enum
 from datetime import datetime
 
+from app.db.base import Base
+from sqlalchemy import DateTime, Enum, Integer, String, Text, func
 from sqlalchemy.dialects.postgresql import ARRAY
 from sqlalchemy.orm import Mapped, mapped_column, relationship
-from sqlalchemy import String, Text, Integer, DateTime, Enum, func
-
-from app.db.base import Base
 
 
 class TicketPriority(str, enum.Enum):

@@ -4,13 +4,26 @@ LangGraph App for Support Service
 
 # Core Business Use-Case
 
-User submits incident via web request --> Agent classifies incident, sets priority and tags --> (If `critical` or `high` + `requires_approval`) Sends TG alert (currently disabled) --> (Otherwise or after HIL confirmation) Saves incident to database --> App saves Agent state and sends web response
+User submits incident via API request  
+→ Agent starts chat  
+→ (If no incident ticket yet) Agent classifies incident, sets priority and tags  
+→ (If `critical` or `high` + `requires_approval`) Sends TG alert (currently disabled)  
+→ (Otherwise or after HIL confirmation) Saves incident to database  
+→ App saves Agent state and sends web response  
+→ (Unless user says "goodbuy") Follow-up chat may continue via new API calls
 
 # Agent Graph Flow
 
 ```mermaid
 flowchart TD
-    START([START]) --> classifier[classifier<br/>classify_ticket]
+    START([START]) --> chat[chat<br/>chat_handler]
+
+    chat -->|route_after_chat| R0{dialog_closed?}
+    R0 -->|yes| endNode[end<br/>dialog_closed=True]
+    R0 -->|no| R0b{ticket_id is not None?}
+    R0b -->|yes: follow-up| dialogEnd[dialog_end<br/>no-op]
+    R0b -->|no: new ticket| classifier[classifier<br/>classify_ticket]
+
     classifier --> prioritizer[prioritizer<br/>prioritize_ticket]
     prioritizer --> tagger[tagger<br/>tag_ticket]
 
@@ -18,18 +31,19 @@ flowchart TD
     R1 -->|yes| alert[alert<br/>send_critical_alert]
     R1 -->|no| R2{needs_confirmation?}
     R2 -->|yes| alert
-    R2 -->|no| saver
+    R2 -->|no| saver[saver<br/>save_ticket]
 
     alert -->|route_after_alert| R3{needs_confirmation?}
     R3 -->|yes| confirmation[confirmation<br/>confirmation_node]
-    R3 -->|no| saver[saver<br/>save_ticket]
+    R3 -->|no| saver
 
     confirmation -->|route_after_confirmation| R4{confirmed is False?}
-    R4 -->|yes / rejected| endNode[end<br/>done=True]
+    R4 -->|yes / rejected| endNode
     R4 -->|no / approved| saver
 
     saver --> END([END])
     endNode --> END
+    dialogEnd --> END
 ```
 
 # Tech Stack
@@ -42,17 +56,18 @@ flowchart TD
 
 # Features
 
-- Agent graph with LLM and deterministic nodes + conditional edges
 - Human-in-the-Loop
+- Multiturn dialog (chat with history)
+- Agent graph with LLM and deterministic nodes + conditional edges
 - Agent state persistence (AsyncPostgresSaver checkpointer)
 - FastAPI endpoints for http agent invocations
 - Healthcheck endpoints
-- Input pydantic validation and sanitization
+- Pydantic validation and sanitization
 - JSON logging and LangSmith tracing
 - Retry/fallback logic on LLM calls 
 - Data models in SQLAlchemy with Alembic migrations 
 - Docker containers with App and Postgres storage (Ollama is NOT containerized) 
-- Tests
+- Pytests
 
 # Dependencies
 
@@ -90,26 +105,27 @@ docker run -d --name support-ai-db -e POSTGRES_USER=support -e POSTGRES_PASSWORD
 ```
 
 ```bash
-uvicorn app.main:app --port 8080
+uvicorn app.main:app --port=8080 --reload
 ```
 
 
-# Try it out
+# Test HIL Interrupt/Resume
 
-HIL request (`high` + `requires_approval`)
+HIL request (`user_input` contains "удалить" -> `high` + `requires_approval`)
 ```bash
-curl -X POST "http://localhost:8080/tickets/" -H "Content-Type: application/json" -d "{\`"thread_id\`": \`"user_hil_002\`", \`"user_input\`": \`"Хочу удалить свой аккаунт\`"}"  
+curl.exe -X POST "http://localhost:8080/tickets/" -H "Content-Type: application/json" -d "{\`"thread_id\`": \`"user_hil_002\`", \`"user_input\`": \`"Хочу удалить свой аккаунт\`"}"  
 ```
+
 Response
 ```
 {"thread_id":"user_hil_002","user_input":"Хочу удалить свой аккаунт","category":"other","priority":"high","tags":["feature","access"],"status":"awaiting_confirmation","id":0,"created_at":"2026-07-31T17:43:09.956856Z","updated_at":"2026-07-31T17:43:09.956856Z"}
 ```
 
 User confirms action
-
 ```bash
-curl -X POST "http://localhost:8080/tickets/confirm" -H "Content-Type: application/json" -d "{\`"thread_id\`": \`"user_hil_002\`", \`"decision\`": \`"yes\`"}
+curl.exe -X POST "http://localhost:8080/tickets/confirm" -H "Content-Type: application/json" -d "{\`"thread_id\`": \`"user_hil_002\`", \`"decision\`": \`"yes\`"}
 ```
+
 Response
 ```
 {"ticket_id":6,"confirmed":true,"status":"in_progress","message":null}
@@ -117,7 +133,7 @@ Response
 
 Check status
 ```bash
-curl http://localhost:8080/tickets/6
+curl.exe http://localhost:8080/tickets/6
 ```
 
 Response
@@ -126,13 +142,65 @@ Response
 ```
 
 Not HIL request (`critical`)
-
 ```bash
-curl -X POST "http://localhost:8080/tickets/" -H "Content-Type: application/json" -d 
+curl.exe -X POST "http://localhost:8080/tickets/" -H "Content-Type: application/json" -d 
 "{\`"thread_id\`": \`"user_crit_001\`", \`"user_input\`": \`"Все упало, ничего не работает, пользователи не могут войти\`"}"
 ```
 
 Response
 ```
 {"thread_id":"user_crit_001","user_input":"Все упало, ничего не работает, пользователи не могут войти","category":"technical","priority":"critical","tags":["login","error","crash"],"status":"in_progress","id":7,"created_at":"2026-07-31T17:51:36.708119Z","updated_at":"2026-07-31T17:51:36.708119Z"}
+```
+
+# Test Multiturn Dialog with History
+
+Request #1 (`user_input` doesn't contain keywords that trigger HIL interrupt/confirmation)
+```bash
+curl.exe -X POST "http://localhost:8080/tickets/" -H "Content-Type: application/json" -d "{\`"thread_id\`": \`"chat_test_002\`", \`"user_input\`": \`"Не могу войти в аккаунт\`"}"
+
+```
+
+Response
+```
+{"thread_id":"chat_test_002","user_input":"Не могу войти в аккаунт","category":"technical","priority":"high","tags":["login","error"],"status":"new","id":9,"created_at":"2026-08-01T18:24:32.285416Z","updated_at":"2026-08-01T18:24:32.285416Z","last_response":"Пожалуйста, проверьте правильность логина и пароля. Если проблема persists, попробуйте сбросить пароль или связаться с нами для дальнейшей помощи.","messages_count":2}
+```
+
+Request #2 (continue chat)
+```bash
+curl.exe -X POST "http://localhost:8080/tickets/chat/chat_test_002/messages" -H "Content-Type: application/json" -d "{\`"content\`": \`"Ошибка 401 при вводе пароля\`"}"
+```
+
+Response
+```
+{"thread_id":"chat_test_002","messages":[{"role":"user","content":"Не могу войти в аккаунт"},{"role":"assistant","content":"Пожалуйста, проверьте правильность логина и пароля. Если проблема persists, попробуйте сбросить пароль или связаться с нами для дальнейшей помощи."},{"role":"user","content":"Ошибка 401 при вводе пароля"},{"role":"assistant","content":"Попробуйте войти в аккаунт через браузер или другое устройство, чтобы исключить проблему с конкретным девайсом. Если проблема persists, давайте попробуем сбросить пароль вместе. Вы согласны?"}],"last_response":"Попробуйте войти в аккаунт через браузер или другое устройство, чтобы исключить проблему с конкретным девайсом. Если проблема persists, давайте попробуем сбросить пароль вместе. Вы согласны?","done":false,"ticket_id":9,"category":"technical","priority":"high"}
+```
+
+Request #3 (chat history)
+```bash
+curl.exe http://localhost:8080/tickets/chat/chat_test_002
+```
+
+Response
+```
+{"thread_id":"chat_test_002","messages":[{"role":"user","content":"Не могу войти в аккаунт"},{"role":"assistant","content":"Пожалуйста, проверьте правильность логина и пароля. Если проблема persists, попробуйте сбросить пароль или связаться с нами для дальнейшей помощи."},{"role":"user","content":"Ошибка 401 при вводе пароля"},{"role":"assistant","content":"Попробуйте войти в аккаунт через браузер или другое устройство, чтобы исключить проблему с конкретным девайсом. Если проблема persists, давайте попробуем сбросить пароль вместе. Вы согласны?"}],"last_response":"Попробуйте войти в аккаунт через браузер или другое устройство, чтобы исключить проблему с конкретным девайсом. Если проблема persists, давайте попробуем сбросить пароль вместе. Вы согласны?","done":false,"ticket_id":9,"category":"technical","priority":"high"}
+```
+
+Request #4 ("пока" ends chat)
+```bash
+curl.exe -X POST "http://localhost:8080/tickets/chat/chat_test_002/messages" -H "Content-Type: application/json" -d "{\`"content\`": \`"Спасибо, пока!\`"}"
+```
+
+Response
+```
+{"thread_id":"chat_test_002","messages":[{"role":"user","content":"Не могу войти в аккаунт"},{"role":"assistant","content":"Пожалуйста, проверьте правильность логина и пароля. Если проблема persists, попробуйте сбросить пароль или связаться с нами для дальнейшей помощи."},{"role":"user","content":"Ошибка 401 при вводе пароля"},{"role":"assistant","content":"Попробуйте войти в аккаунт через браузер или другое устройство, чтобы исключить проблему с конкретным девайсом. Если проблема persists, давайте попробуем сбросить пароль вместе. Вы согласны?"},{"role":"user","content":"Спасибо, пока!"},{"role":"assistant","content":"Приятно было вам помочь! До свидания!"}],"last_response":"Приятно было вам помочь! До свидания!","done":true,"ticket_id":9,"category":"technical","priority":"high"}
+```
+
+Request #5 (attempt to continue when `dialog_closed=True`)
+```bash
+curl.exe -X POST "http://localhost:8080/tickets/chat/chat_test_002/messages" -H "Content-Type: application/json" -d "{\`"content\`": \`"BULLSHIT\`"}
+```
+
+Response
+```
+{"detail":"Диалог завершён"}
 ```
