@@ -1,0 +1,124 @@
+---
+description: Repository-specific contribution conventions for SupportAI
+alwaysApply: false
+
+---
+
+
+---
+# SupportAI — Contribution Rules
+
+* When implementing features, consult `docs/PROJECT_GUIDE.md` for architectural context if it is relevant to the task.
+* Treat the guide as supporting documentation.
+* ALWAYS verify implementation details against the current codebase before making changes.
+* Follow patterns already present under `app/`.
+
+---
+
+## Architecture & layering
+
+- Keep this a **single FastAPI app**. Do not split into new deployable services unless explicitly requested.
+- Put incident **workflow** (chat, classify, prioritize, tag, alert, HIL, save, routing) in `app/agent/` (nodes + `graph.py` + `AgentState`). Keep `app/api/routes/tickets.py` as orchestration: validate → `ainvoke` / `Command(resume=...)` / CRUD → HTTP response.
+- Persist **tickets** via `app/db` + `app/crud`. Persist **dialog / HIL resume** via LangGraph checkpoints (`app/agent/checkpointer.py`). Do not make the `tickets` table the source of truth for chat history.
+- Pass agent runtime deps only through `config["configurable"]` keys already used: `session`, `telegram_client`, `thread_id` (see `tickets.py`, `saver.py`, `alert.py`).
+- Change control flow by editing `route_after_*` in `graph.py` and registering nodes there—not by embedding alternate pipelines in routes.
+
+**Layers (where code lives):**
+
+| Concern | Location |
+|---------|----------|
+| HTTP + Pydantic contracts | `app/api/routes/`, `app/api/schemas/` |
+| Workflow steps + LLM | `app/agent/nodes/`, `llm.py`, `retry.py` |
+| Ticket/history SQL | `app/crud/ticket.py`, `app/db/models/` |
+| Graph/Telegram factories | `app/core/dependencies.py` |
+| Settings / sanitizers / logging | `app/config.py`, `app/security/sanitizers.py`, `app/logging_config.py` |
+
+**Exception:** `health.py` may run simple aggregate queries on `Ticket`. Ticket create/get/update/delete and agent save must go through `app/crud/ticket.py`.
+
+Do **not** introduce a `services/` (or similar) package; this repo has no service layer.
+
+---
+
+## Where new code belongs
+
+| Change | Put it here |
+|--------|-------------|
+| Ticket/chat/HIL HTTP API | `routes/tickets.py` + `schemas/ticket.py` |
+| New graph step | `agent/nodes/<name>.py` + wire in `graph.py` (+ `state.py` if new fields) |
+| New ticket column / enum | model + Alembic migration + CRUD (+ schema/saver if on create path) |
+| New CRUD operation | `app/crud/ticket.py` |
+| App table schema | `alembic/versions/` — not checkpoint `setup()` |
+| Shared route wiring | `app/core/dependencies.py` |
+| Dev helpers | `scripts/` |
+
+Do not add ORM models for LangGraph checkpoint tables under `app/db/models/`.
+
+---
+
+## Dependencies & imports
+
+- DB in routes: `Depends(get_db_session)`; pass the same session into the graph config when `saver` may run.
+- Graph: `get_agent_graph()` then compile **per request** with `get_checkpointer(db_url)`.
+- Telegram: `get_telegram_client_context()`; nodes must tolerate `None` / unset config (existing `alert` behavior).
+- Config: `get_settings()` only (except existing LangSmith env bridging in `llm.py`).
+- LLM: shared `app.agent.llm` client; wrap node LLM calls with `@with_llm_retry` from `app.agent.retry`.
+- Imports: absolute `from app....`. CRUD may continue to take `TicketCreate` / `TicketUpdate` from `app.api.schemas` (existing pattern).
+
+---
+
+## Agent & API contracts (do not break)
+
+- Every graph run starts at **`chat`**. Re-triage only when `ticket_id is None`; follow-ups use `dialog_end` (`route_after_chat`).
+- Preserve API behaviors: create → 409 if checkpoint exists; chat → 404/400 for missing/closed/HIL-pending; confirm → `Command(resume=yes|no)` when `snapshot.interrupts`; HIL pause on create → `status=awaiting_confirmation`, `id=0` (not a DB `TicketStatus`).
+- On `confirmed is False`, do not call saver (route to `end`).
+- Treat `alert_failed` as non-fatal on create when `ticket_id` is present (existing `tickets.py` logic).
+- Keep `AgentState.messages` append semantics (`Annotated[..., operator.add]`) when editing chat state.
+- Checkpoint key remains `thread_id`.
+
+---
+
+## Naming (project patterns)
+
+- Node functions / graph ids: follow existing pairs (`classify_ticket` / `"classifier"`, `save_ticket` / `"saver"`, `chat_handler` / `"chat"`, etc.).
+- Schemas: `*Create`, `*Update`, `*Response`, `ConfirmRequest` / `ConfirmResponse`.
+- Dependencies: `get_*` (`get_db_session`, `get_agent_graph`, `get_settings`).
+- Logs involving a session: prefix messages with `[{thread_id}]`.
+- Match the file’s existing language for docstrings/logs (many modules use Russian).
+
+---
+
+## Validation & LLM nodes
+
+- HTTP: validate with schemas in `app/api/schemas/ticket.py`.
+- Before any user text enters an LLM prompt in nodes: `validate_input_length` → `check_for_injection` → `sanitize_input` (as in classifier/prioritizer/tagger/chat_handler).
+- Whitelist-validate LLM outputs (category / priority / tags); on failure use the same safe defaults as existing nodes (`other`, `medium`, etc.) and set `error` on state rather than failing the whole graph for expected cases.
+- Keep HIL gating via prioritizer `requires_approval` + sensitive keywords (or extend that mechanism); do not remove the high+approval → confirmation path when editing priority/alert routing.
+
+---
+
+## Error handling & logging
+
+- Routes: use `HTTPException` with the status meanings already established (409/404/400/500) in `tickets.py`.
+- Nodes: on validation/injection/retry exhaustion, return partial state + `error` + safe defaults; use `logger.exception` only for unexpected failures.
+- Logger: `from app.logging_config import logger`. Prefer debug at step start, info on success, warning on validation/injection/bad LLM output, error on failures; include `extra` fields (`elapsed_ms`, `ticket_id`, …) where neighboring code does.
+
+---
+
+## Testing
+
+- Add tests under `tests/test_*.py` with **mocked LLM** callables (see `tests/test_critical.py`, `tests/test_chat_history.py`).
+- Default unit tests must not require live Ollama or Postgres.
+- When changing sanitizers, classifier fallbacks, or chat goodbye/`dialog_closed`, extend those existing test modules.
+
+---
+
+## Things to avoid (repo-specific)
+
+- Do not implement triage or `interrupt()` HIL inside FastAPI handlers.
+- Do not add ticket CRUD SQL to `tickets.py`—extend `crud/ticket.py`.
+- Do not drop checkpointer usage for multi-turn or HIL in favor of DB-only chat storage.
+- Do not construct per-node `ChatOllama` instances bypassing `app.agent.llm`.
+- Do not skip the sanitizer sequence on new LLM-facing nodes.
+- Do not enable rate limiting or auth solely because `RATE_LIMIT_PER_MINUTE` / `SECRET_KEY` exist in Settings—they are unused under `app/` today.
+- Do not add Ollama to Compose or assume it is containerized; host Ollama is the project default.
+- Do not treat `awaiting_confirmation` as a `TicketStatus` enum value.
