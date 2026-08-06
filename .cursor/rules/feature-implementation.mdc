@@ -1,0 +1,12 @@
+---
+description: Feature Implementation rules
+alwaysApply: false
+---
+# Feature Implementation
+
+- Search for similar functionality before creating new abstractions.
+- Prefer extending existing services over introducing parallel implementations.
+- Keep changes localized.
+- Minimize API surface changes.
+- Explain architectural trade-offs before proposing refactors.
+- Preserve backward compatibility unless the task explicitly allows breaking changes.
