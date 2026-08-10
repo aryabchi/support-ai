@@ -84,6 +84,8 @@ def chat_handler(state: AgentState) -> dict:
     max_followup_turns = get_settings().RAG_MAX_FOLLOWUP_TURNS
     rag_used = False
     rag_source_paths: list[str] | None = None
+    rag_hit_count: int | None = None
+    rag_fallback_reason: str | None = None
     update_rag_fields = False
 
     logger.debug(f"[{thread_id}] Начало обработки сообщения")
@@ -120,9 +122,13 @@ def chat_handler(state: AgentState) -> dict:
         rag_chunks: list[RagChunk] = []
         if is_followup:
             update_rag_fields = True
-            rag_chunks, rag_used, rag_source_paths = _retrieve_for_followup(
-                state, safe_input, thread_id
-            )
+            (
+                rag_chunks,
+                rag_used,
+                rag_source_paths,
+                rag_fallback_reason,
+            ) = _retrieve_for_followup(state, safe_input, thread_id)
+            rag_hit_count = len(rag_chunks)
         response = _generate_response(
             state,
             safe_input,
@@ -132,6 +138,7 @@ def chat_handler(state: AgentState) -> dict:
         )
 
     elapsed = time.time() - start_time
+    source_path_count = len(rag_source_paths) if rag_source_paths else 0
     logger.info(
         f"[{thread_id}] Сгенерирован ответ: {response[:80]}...",
         extra={
@@ -141,6 +148,13 @@ def chat_handler(state: AgentState) -> dict:
             "close_reason": close_reason,
             "followup_turn_count": followup_turn_count if is_followup else None,
             "rag_used": rag_used if update_rag_fields else None,
+            "rag_hit_count": rag_hit_count if update_rag_fields else None,
+            "rag_source_path_count": (
+                source_path_count if update_rag_fields else None
+            ),
+            "rag_fallback_reason": (
+                rag_fallback_reason if update_rag_fields else None
+            ),
         },
     )
 
@@ -164,6 +178,14 @@ def chat_handler(state: AgentState) -> dict:
         result["close_reason"] = close_reason
         logger.info(
             f"[{thread_id}] Диалог завершён: close_reason={close_reason}",
+            extra={
+                "thread_id": thread_id,
+                "close_reason": close_reason,
+                "followup_turn_count": (
+                    followup_turn_count if is_followup else None
+                ),
+                "ticket_id": str(state.ticket_id) if state.ticket_id else None,
+            },
         )
 
     projected_count = len(state.messages) + 2
@@ -330,31 +352,62 @@ def _build_rag_prompt(
 
 def _retrieve_for_followup(
     state: AgentState, safe_input: str, thread_id: str
-) -> tuple[list[RagChunk], bool, list[str] | None]:
+) -> tuple[list[RagChunk], bool, list[str] | None, str | None]:
     """
     Gated retrieve: только при ticket_id + category.
-    Пустой результат / отсутствие category → fallback (rag_used=False).
+
+    Returns:
+        chunks, rag_used, source_paths, fallback_reason
+        (fallback_reason is None when RAG hits are used).
     """
     if not state.category:
+        reason = "missing_category"
         logger.warning(
             f"[{thread_id}] RAG skip: ticket_id задан, но category отсутствует — "
-            "ungrounded chat"
+            "ungrounded chat",
+            extra={
+                "thread_id": thread_id,
+                "rag_used": False,
+                "rag_hit_count": 0,
+                "rag_source_path_count": 0,
+                "rag_fallback_reason": reason,
+                "ticket_id": str(state.ticket_id) if state.ticket_id else None,
+            },
         )
-        return [], False, None
+        return [], False, None, reason
 
     query = _build_rag_query(safe_input, state.tags)
     chunks = retrieve(query, state.category)
     if not chunks:
+        reason = "empty_hits"
         logger.warning(
-            f"[{thread_id}] RAG empty/fallback: hits=0, category={state.category}"
+            f"[{thread_id}] RAG empty/fallback: hits=0, category={state.category}",
+            extra={
+                "thread_id": thread_id,
+                "rag_used": False,
+                "rag_hit_count": 0,
+                "rag_source_path_count": 0,
+                "rag_fallback_reason": reason,
+                "category": state.category,
+                "ticket_id": str(state.ticket_id) if state.ticket_id else None,
+            },
         )
-        return [], False, None
+        return [], False, None, reason
 
     paths = list(dict.fromkeys(chunk.source_path for chunk in chunks))
     logger.info(
-        f"[{thread_id}] RAG used: hits={len(chunks)}, sources={len(paths)}"
+        f"[{thread_id}] RAG used: hits={len(chunks)}, sources={len(paths)}",
+        extra={
+            "thread_id": thread_id,
+            "rag_used": True,
+            "rag_hit_count": len(chunks),
+            "rag_source_path_count": len(paths),
+            "rag_fallback_reason": None,
+            "category": state.category,
+            "ticket_id": str(state.ticket_id) if state.ticket_id else None,
+        },
     )
-    return chunks, True, paths
+    return chunks, True, paths, None
 
 
 def _build_goodbye_prompt(state: AgentState, safe_input: str) -> str:

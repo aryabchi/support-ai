@@ -197,12 +197,17 @@ async def send_message_to_chat(
 
     elapsed = time.time() - start_time
     messages = result_state.get("messages", [])
+    source_paths = result_state.get("rag_source_paths")
     logger.info(
         f"[{thread_id}] Диалог обновлён: {len(messages)} сообщений в истории",
         extra={
             "thread_id": thread_id,
             "messages_count": len(messages),
             "dialog_closed": result_state.get("dialog_closed", False),
+            "close_reason": result_state.get("close_reason"),
+            "followup_turn_count": result_state.get("followup_turn_count"),
+            "rag_used": result_state.get("rag_used"),
+            "rag_source_path_count": len(source_paths) if source_paths else 0,
             "elapsed_ms": round(elapsed * 1000, 2),
         },
     )
@@ -215,6 +220,7 @@ async def send_message_to_chat(
         ticket_id=result_state.get("ticket_id"),
         category=result_state.get("category"),
         priority=result_state.get("priority"),
+        source_paths=result_state.get("rag_source_paths"),
     )
 
 
@@ -244,6 +250,7 @@ async def get_chat_history(
         ticket_id=values.get("ticket_id"),
         category=values.get("category"),
         priority=values.get("priority"),
+        source_paths=values.get("rag_source_paths"),
     )
 
 

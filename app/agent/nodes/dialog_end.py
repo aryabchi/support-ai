@@ -72,6 +72,11 @@ async def dialog_end(state: AgentState, config: RunnableConfig) -> dict:
                 "thread_id": thread_id,
                 "ticket_id": str(state.ticket_id),
                 "close_reason": state.close_reason,
+                "followup_turn_count": state.followup_turn_count,
+                "rag_used": state.rag_used,
+                "rag_source_path_count": (
+                    len(state.rag_source_paths) if state.rag_source_paths else 0
+                ),
                 "elapsed_ms": round(elapsed * 1000, 2),
             },
         )

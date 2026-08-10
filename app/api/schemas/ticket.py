@@ -100,6 +100,7 @@ class ChatResponse(BaseModel):
     ticket_id: int | None = None
     category: str | None = None
     priority: str | None = None
+    source_paths: list[str] | None = None
 
 
 class TicketListResponse(BaseModel):

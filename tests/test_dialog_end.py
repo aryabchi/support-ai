@@ -58,6 +58,48 @@ async def test_success_close_updates_ticket_resolved():
 
 
 @pytest.mark.asyncio
+async def test_success_resolve_logs_structured_fields():
+    from app.agent.nodes import dialog_end as module
+
+    session = MagicMock()
+    info_extras: list[dict] = []
+
+    def capture_info(msg, *args, **kwargs):
+        if "extra" in kwargs:
+            info_extras.append(kwargs["extra"])
+
+    with (
+        patch(
+            "app.agent.nodes.dialog_end.ticket_crud.update_ticket",
+            new_callable=AsyncMock,
+            return_value=MagicMock(),
+        ),
+        patch(
+            "app.agent.nodes.dialog_end.ticket_crud.add_ticket_history",
+            new_callable=AsyncMock,
+        ),
+        patch.object(module.logger, "info", side_effect=capture_info),
+    ):
+        state = AgentState(
+            thread_id="t1",
+            user_input="Спасибо, помогло!",
+            ticket_id=42,
+            close_reason="success",
+            dialog_closed=True,
+            followup_turn_count=2,
+            rag_used=True,
+            rag_source_paths=["technical/login_error_401.md"],
+        )
+        await dialog_end(state, _config(session))
+
+    resolve_extra = next(e for e in info_extras if e.get("close_reason") == "success")
+    assert resolve_extra["ticket_id"] == "42"
+    assert resolve_extra["followup_turn_count"] == 2
+    assert resolve_extra["rag_used"] is True
+    assert resolve_extra["rag_source_path_count"] == 1
+
+
+@pytest.mark.asyncio
 async def test_goodbye_does_not_update_ticket():
     with patch(
         "app.agent.nodes.dialog_end.ticket_crud.update_ticket",

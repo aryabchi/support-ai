@@ -381,6 +381,108 @@ class TestGatedRag:
         assert any("category" in w for w in warnings)
 
 
+class TestStructuredRagLogging:
+    """Offline Step 12: structured extras on RAG / close logs (no live app)."""
+
+    @patch("app.agent.nodes.chat_handler.retrieve")
+    @patch("app.agent.nodes.chat_handler._chat_llm_call")
+    def test_response_log_includes_rag_fields_on_hits(self, mock_llm, mock_retrieve):
+        from app.agent.rag.retriever import RagChunk
+        from app.agent.nodes import chat_handler as module
+
+        mock_retrieve.return_value = [
+            RagChunk(
+                source_path="technical/login_error_401.md",
+                text="Ошибка 401",
+                score=0.9,
+            )
+        ]
+        mock_llm.return_value = _mock_llm_response("Сбросьте пароль.")
+
+        info_extras: list[dict] = []
+
+        def capture_info(msg, *args, **kwargs):
+            if "extra" in kwargs:
+                info_extras.append(kwargs["extra"])
+
+        with patch.object(module.logger, "info", side_effect=capture_info):
+            chat_handler(
+                AgentState(
+                    thread_id="rag_log_001",
+                    user_input="Ошибка 401",
+                    ticket_id=7,
+                    category="technical",
+                    tags=["login"],
+                )
+            )
+
+        response_extra = next(
+            e
+            for e in info_extras
+            if e.get("rag_used") is True and "followup_turn_count" in e
+        )
+        assert response_extra["thread_id"] == "rag_log_001"
+        assert response_extra["rag_hit_count"] == 1
+        assert response_extra["rag_source_path_count"] == 1
+        assert response_extra["rag_fallback_reason"] is None
+        assert response_extra["followup_turn_count"] == 1
+
+    @patch("app.agent.nodes.chat_handler.retrieve", return_value=[])
+    @patch("app.agent.nodes.chat_handler._chat_llm_call")
+    def test_empty_hits_logs_fallback_reason(self, mock_llm, _mock_retrieve):
+        from app.agent.nodes import chat_handler as module
+
+        mock_llm.return_value = _mock_llm_response("Уточните ошибку.")
+        warn_extras: list[dict] = []
+
+        def capture_warning(msg, *args, **kwargs):
+            if "extra" in kwargs:
+                warn_extras.append(kwargs["extra"])
+
+        with patch.object(module.logger, "warning", side_effect=capture_warning):
+            chat_handler(
+                AgentState(
+                    thread_id="rag_log_002",
+                    user_input="Что дальше?",
+                    ticket_id=7,
+                    category="technical",
+                )
+            )
+
+        assert any(
+            e.get("rag_fallback_reason") == "empty_hits" and e.get("rag_used") is False
+            for e in warn_extras
+        )
+
+    @patch("app.agent.nodes.chat_handler._chat_llm_call")
+    def test_close_log_includes_close_reason(self, mock_llm):
+        from app.agent.nodes import chat_handler as module
+
+        info_extras: list[dict] = []
+
+        def capture_info(msg, *args, **kwargs):
+            if "extra" in kwargs:
+                info_extras.append(kwargs["extra"])
+
+        with patch.object(module.logger, "info", side_effect=capture_info):
+            chat_handler(
+                AgentState(
+                    thread_id="rag_log_003",
+                    user_input="Спасибо, помогло!",
+                    ticket_id=7,
+                    followup_turn_count=1,
+                )
+            )
+
+        close_extra = next(
+            e
+            for e in info_extras
+            if e.get("close_reason") == "success" and "ticket_id" in e
+        )
+        assert close_extra["followup_turn_count"] == 2
+        assert close_extra["ticket_id"] == "7"
+
+
 class TestChatPromptHelpers:
     def test_history_block_limits_messages(self):
         messages = [{"role": "user", "content": f"msg{i}"} for i in range(15)]
@@ -428,3 +530,32 @@ class TestRouteAfterChat:
     def test_first_message_goes_to_classifier(self):
         state = AgentState(thread_id="t1", user_input="Не работает вход")
         assert route_after_chat(state) == "classifier"
+
+
+class TestChatResponseSourcePaths:
+    """Additive ChatResponse.source_paths (Step 11)."""
+
+    def test_source_paths_optional_default_none(self):
+        from app.api.schemas.ticket import ChatResponse
+
+        resp = ChatResponse(thread_id="t1", messages=[])
+        assert resp.source_paths is None
+
+    def test_source_paths_accepted_when_present(self):
+        from app.api.schemas.ticket import ChatResponse
+
+        resp = ChatResponse(
+            thread_id="t1",
+            messages=[],
+            source_paths=["technical/login_error_401.md"],
+        )
+        assert resp.source_paths == ["technical/login_error_401.md"]
+
+    def test_openapi_schema_includes_source_paths(self):
+        from app.api.schemas.ticket import ChatResponse
+
+        props = ChatResponse.model_json_schema()["properties"]
+        assert "source_paths" in props
+        assert props["source_paths"].get("anyOf") or props["source_paths"].get(
+            "type"
+        )
