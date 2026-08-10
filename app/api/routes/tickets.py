@@ -185,7 +185,11 @@ async def send_message_to_chat(
             )
 
         result_state = await agent_graph.ainvoke(
-            AgentState(thread_id=thread_id, user_input=request.content),
+            # Только явно заданные поля — иначе Pydantic defaults
+            # (followup_turn_count=0, dialog_closed=False, …) затрут checkpoint.
+            AgentState(thread_id=thread_id, user_input=request.content).model_dump(
+                exclude_unset=True
+            ),
             config=config,
         )
 

@@ -532,6 +532,19 @@ class TestRouteAfterChat:
         assert route_after_chat(state) == "classifier"
 
 
+class TestPartialInvokeState:
+    """Follow-up ainvoke must not send Pydantic defaults that overwrite checkpoint."""
+
+    def test_exclude_unset_omits_followup_turn_count(self):
+        data = AgentState(
+            thread_id="t1", user_input="уточнение"
+        ).model_dump(exclude_unset=True)
+        assert data == {"thread_id": "t1", "user_input": "уточнение"}
+        assert "followup_turn_count" not in data
+        assert "dialog_closed" not in data
+        assert "ticket_id" not in data
+
+
 class TestChatResponseSourcePaths:
     """Additive ChatResponse.source_paths (Step 11)."""
 

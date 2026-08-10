@@ -122,18 +122,18 @@ curl -s "http://127.0.0.1:8080/tickets/TICKET_ID"
 ### Scenario B — N-cap (dialog closes, status unchanged)
 
 ```bash
-printf '%s' '{"thread_id":"rag_ncap_001","user_input":"Не могу войти в аккаунт"}' > /tmp/rag_b1.json
+printf '%s' '{"thread_id":"rag_ncap_002","user_input":"Не могу войти в аккаунт"}' > /tmp/rag_b1.json
 curl -s -X POST "http://127.0.0.1:8080/tickets/" -H "Content-Type: application/json; charset=utf-8" --data-binary @/tmp/rag_b1.json
 printf '%s' '{"content":"Ошибка 401 при вводе пароля"}' > /tmp/rag_b2.json
-curl -s -X POST "http://127.0.0.1:8080/tickets/chat/rag_ncap_001/messages" -H "Content-Type: application/json; charset=utf-8" --data-binary @/tmp/rag_b2.json
+curl -s -X POST "http://127.0.0.1:8080/tickets/chat/rag_ncap_002/messages" -H "Content-Type: application/json; charset=utf-8" --data-binary @/tmp/rag_b2.json
 printf '%s' '{"content":"Сброс пароля не сработал"}' > /tmp/rag_b3.json
-curl -s -X POST "http://127.0.0.1:8080/tickets/chat/rag_ncap_001/messages" -H "Content-Type: application/json; charset=utf-8" --data-binary @/tmp/rag_b3.json
+curl -s -X POST "http://127.0.0.1:8080/tickets/chat/rag_ncap_002/messages" -H "Content-Type: application/json; charset=utf-8" --data-binary @/tmp/rag_b3.json
 printf '%s' '{"content":"Что ещё можно попробовать?"}' > /tmp/rag_b4.json
-curl -s -X POST "http://127.0.0.1:8080/tickets/chat/rag_ncap_001/messages" -H "Content-Type: application/json; charset=utf-8" --data-binary @/tmp/rag_b4.json
-curl -s "http://127.0.0.1:8080/tickets/chat/rag_ncap_001"
+curl -s -X POST "http://127.0.0.1:8080/tickets/chat/rag_ncap_002/messages" -H "Content-Type: application/json; charset=utf-8" --data-binary @/tmp/rag_b4.json
+curl -s "http://127.0.0.1:8080/tickets/chat/rag_ncap_002"
 curl -s "http://127.0.0.1:8080/tickets/TICKET_ID"
 printf '%s' '{"content":"Ещё вопрос"}' > /tmp/rag_b5.json
-curl -s -X POST "http://127.0.0.1:8080/tickets/chat/rag_ncap_001/messages" -H "Content-Type: application/json; charset=utf-8" --data-binary @/tmp/rag_b5.json
+curl -s -X POST "http://127.0.0.1:8080/tickets/chat/rag_ncap_002/messages" -H "Content-Type: application/json; charset=utf-8" --data-binary @/tmp/rag_b5.json
 ```
 
 | Check | Expect |
