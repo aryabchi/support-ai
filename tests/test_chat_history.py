@@ -63,8 +63,9 @@ class TestChatHandler:
         assert "Ошибка 401 при вводе пароля" in prompt
         assert "Не могу войти" in prompt
 
+    @patch("app.agent.nodes.chat_handler.retrieve", return_value=[])
     @patch("app.agent.nodes.chat_handler._chat_llm_call")
-    def test_prompt_includes_ticket_context(self, mock_llm):
+    def test_prompt_includes_ticket_context(self, mock_llm, _mock_retrieve):
         mock_llm.return_value = _mock_llm_response("Мы уже работаем над вашей заявкой.")
 
         state = AgentState(
@@ -180,8 +181,9 @@ class TestChatHandler:
 class TestFollowupTurnBudget:
     """Счётчик follow-up и N-cap при ticket_id (RAG_MAX_FOLLOWUP_TURNS=2)."""
 
+    @patch("app.agent.nodes.chat_handler.retrieve", return_value=[])
     @patch("app.agent.nodes.chat_handler._chat_llm_call")
-    def test_followup_turn_1_proceeds_and_increments(self, mock_llm):
+    def test_followup_turn_1_proceeds_and_increments(self, mock_llm, _mock_retrieve):
         mock_llm.return_value = _mock_llm_response("Проверьте пароль.")
 
         state = AgentState(
@@ -198,8 +200,9 @@ class TestFollowupTurnBudget:
         assert "close_reason" not in result
         mock_llm.assert_called_once()
 
+    @patch("app.agent.nodes.chat_handler.retrieve", return_value=[])
     @patch("app.agent.nodes.chat_handler._chat_llm_call")
-    def test_followup_turn_2_still_proceeds(self, mock_llm):
+    def test_followup_turn_2_still_proceeds(self, mock_llm, _mock_retrieve):
         mock_llm.return_value = _mock_llm_response("Попробуйте сброс пароля.")
 
         state = AgentState(
@@ -261,6 +264,121 @@ class TestFollowupTurnBudget:
         assert result["close_reason"] == "success"
         assert result["dialog_closed"] is True
         mock_llm.assert_not_called()
+
+
+class TestGatedRag:
+    """RAG только на follow-up с ticket_id + category."""
+
+    @patch("app.agent.nodes.chat_handler.retrieve")
+    @patch("app.agent.nodes.chat_handler._chat_llm_call")
+    def test_rag_hits_use_grounded_prompt_and_paths(self, mock_llm, mock_retrieve):
+        from app.agent.rag.retriever import RagChunk
+
+        mock_retrieve.return_value = [
+            RagChunk(
+                source_path="technical/login_error_401.md",
+                text="При ошибке 401 сбросьте пароль.",
+                score=0.91,
+            ),
+            RagChunk(
+                source_path="technical/password_reset_steps.md",
+                text="Шаги сброса пароля.",
+                score=0.88,
+            ),
+        ]
+        mock_llm.return_value = _mock_llm_response("Сбросьте пароль по инструкции.")
+
+        state = AgentState(
+            thread_id="t1",
+            user_input="Ошибка 401 при вводе пароля",
+            ticket_id=42,
+            category="technical",
+            tags=["login", "401"],
+        )
+        result = chat_handler(state)
+
+        mock_retrieve.assert_called_once()
+        query = mock_retrieve.call_args[0][0]
+        assert "Ошибка 401 при вводе пароля" in query
+        assert "login" in query
+        assert "401" in query
+        assert mock_retrieve.call_args[0][1] == "technical"
+
+        prompt = mock_llm.call_args[0][0]
+        assert "БАЗА ЗНАНИЙ" in prompt
+        assert "[Документ 1]" in prompt
+        assert "При ошибке 401 сбросьте пароль." in prompt
+        assert "technical/login_error_401.md" not in prompt
+        assert result["rag_used"] is True
+        assert result["rag_source_paths"] == [
+            "technical/login_error_401.md",
+            "technical/password_reset_steps.md",
+        ]
+
+    @patch("app.agent.nodes.chat_handler.retrieve")
+    @patch("app.agent.nodes.chat_handler._chat_llm_call")
+    def test_create_path_never_calls_retriever(self, mock_llm, mock_retrieve):
+        mock_llm.return_value = _mock_llm_response("Опишите проблему.")
+
+        state = AgentState(thread_id="t1", user_input="Не могу войти")
+        chat_handler(state)
+
+        mock_retrieve.assert_not_called()
+        prompt = mock_llm.call_args[0][0]
+        assert "БАЗА ЗНАНИЙ" not in prompt
+
+    @patch("app.agent.nodes.chat_handler.retrieve", return_value=[])
+    @patch("app.agent.nodes.chat_handler._chat_llm_call")
+    def test_empty_retrieval_falls_back_ungrounded(self, mock_llm, mock_retrieve):
+        mock_llm.return_value = _mock_llm_response("Уточните, какая ошибка?")
+
+        warnings: list[str] = []
+        from app.agent.nodes import chat_handler as module
+
+        with patch.object(
+            module.logger,
+            "warning",
+            side_effect=lambda msg, *a, **k: warnings.append(msg),
+        ):
+            state = AgentState(
+                thread_id="t1",
+                user_input="Что делать дальше?",
+                ticket_id=42,
+                category="technical",
+            )
+            result = chat_handler(state)
+
+        mock_retrieve.assert_called_once()
+        prompt = mock_llm.call_args[0][0]
+        assert "БАЗА ЗНАНИЙ" not in prompt
+        assert result["rag_used"] is False
+        assert result["rag_source_paths"] is None
+        assert any("RAG empty" in w or "fallback" in w for w in warnings)
+
+    @patch("app.agent.nodes.chat_handler.retrieve")
+    @patch("app.agent.nodes.chat_handler._chat_llm_call")
+    def test_missing_category_skips_rag(self, mock_llm, mock_retrieve):
+        mock_llm.return_value = _mock_llm_response("Уточните детали.")
+
+        warnings: list[str] = []
+        from app.agent.nodes import chat_handler as module
+
+        with patch.object(
+            module.logger,
+            "warning",
+            side_effect=lambda msg, *a, **k: warnings.append(msg),
+        ):
+            state = AgentState(
+                thread_id="t1",
+                user_input="Нужна помощь",
+                ticket_id=42,
+                category=None,
+            )
+            result = chat_handler(state)
+
+        mock_retrieve.assert_not_called()
+        assert result["rag_used"] is False
+        assert any("category" in w for w in warnings)
 
 
 class TestChatPromptHelpers:
