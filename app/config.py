@@ -92,6 +92,37 @@ class Settings(BaseSettings):
     # Получите через @userinfobot
     TELEGRAM_CHAT_ID: str | None
 
+    # === RAG / Qdrant ===
+    QDRANT_URL: AnyHttpUrl = Field(
+        default="http://localhost:6333",
+        description="URL API Qdrant",
+    )
+
+    QDRANT_COLLECTION: str = Field(
+        default="support_ai_kb",
+        description="Имя коллекции в Qdrant",
+    )
+
+    RAG_TOP_K: int = Field(
+        default=3, gt=0, description="Число чанков, возвращаемых ретривером"
+    )
+
+    RAG_EMBED_MODEL: str = Field(
+        default="all-MiniLM-L6-v2",
+        description="Модель SentenceTransformer для эмбеддингов",
+    )
+
+    RAG_MAX_FOLLOWUP_TURNS: int = Field(
+        default=2,
+        gt=0,
+        description="Максимум follow-up сообщений до принудительного закрытия диалога",
+    )
+
+    RAG_DOCS_PATH: str = Field(
+        default="data/rag_docs",
+        description="Путь к локальному корпусу документов для инжеста",
+    )
+
     # === Свойства для удобства ===
     @property
     def is_dev(self) -> bool:
