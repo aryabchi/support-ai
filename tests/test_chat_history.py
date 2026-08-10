@@ -15,6 +15,7 @@ from app.agent.state import AgentState
 from app.agent.nodes.chat_handler import (
     chat_handler,
     MAX_MESSAGES,
+    TURN_CAP_RESPONSE,
     _build_chat_prompt,
     _build_history_block,
 )
@@ -174,6 +175,92 @@ class TestChatHandler:
             chat_handler(state)
 
         assert any("превышает лимит" in w for w in warnings)
+
+
+class TestFollowupTurnBudget:
+    """Счётчик follow-up и N-cap при ticket_id (RAG_MAX_FOLLOWUP_TURNS=2)."""
+
+    @patch("app.agent.nodes.chat_handler._chat_llm_call")
+    def test_followup_turn_1_proceeds_and_increments(self, mock_llm):
+        mock_llm.return_value = _mock_llm_response("Проверьте пароль.")
+
+        state = AgentState(
+            thread_id="t1",
+            user_input="Ошибка 401",
+            ticket_id=42,
+            category="technical",
+            followup_turn_count=0,
+        )
+        result = chat_handler(state)
+
+        assert result["followup_turn_count"] == 1
+        assert result.get("dialog_closed") is not True
+        assert "close_reason" not in result
+        mock_llm.assert_called_once()
+
+    @patch("app.agent.nodes.chat_handler._chat_llm_call")
+    def test_followup_turn_2_still_proceeds(self, mock_llm):
+        mock_llm.return_value = _mock_llm_response("Попробуйте сброс пароля.")
+
+        state = AgentState(
+            thread_id="t1",
+            user_input="Сброс пароля не сработал",
+            ticket_id=42,
+            category="technical",
+            followup_turn_count=1,
+        )
+        result = chat_handler(state)
+
+        assert result["followup_turn_count"] == 2
+        assert result.get("dialog_closed") is not True
+        mock_llm.assert_called_once()
+
+    @patch("app.agent.nodes.chat_handler._chat_llm_call")
+    def test_turn_cap_on_third_followup_skips_llm(self, mock_llm):
+        state = AgentState(
+            thread_id="t1",
+            user_input="Что ещё можно попробовать?",
+            ticket_id=42,
+            category="technical",
+            followup_turn_count=2,
+        )
+        result = chat_handler(state)
+
+        assert result["followup_turn_count"] == 3
+        assert result["dialog_closed"] is True
+        assert result["close_reason"] == "turn_cap"
+        assert result["last_response"] == TURN_CAP_RESPONSE
+        assert "лимит" in result["last_response"].lower()
+        mock_llm.assert_not_called()
+
+    @patch("app.agent.nodes.chat_handler._chat_llm_call")
+    def test_create_path_without_ticket_does_not_increment(self, mock_llm):
+        mock_llm.return_value = _mock_llm_response("Опишите проблему.")
+
+        state = AgentState(
+            thread_id="t1",
+            user_input="Не могу войти",
+            followup_turn_count=0,
+        )
+        result = chat_handler(state)
+
+        assert "followup_turn_count" not in result
+        mock_llm.assert_called_once()
+
+    @patch("app.agent.nodes.chat_handler._chat_llm_call")
+    def test_success_close_beats_turn_cap_on_third_followup(self, mock_llm):
+        state = AgentState(
+            thread_id="t1",
+            user_input="Спасибо, помогло!",
+            ticket_id=42,
+            followup_turn_count=2,
+        )
+        result = chat_handler(state)
+
+        assert result["followup_turn_count"] == 3
+        assert result["close_reason"] == "success"
+        assert result["dialog_closed"] is True
+        mock_llm.assert_not_called()
 
 
 class TestChatPromptHelpers:

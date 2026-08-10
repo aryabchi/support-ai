@@ -6,6 +6,7 @@ from app.agent.llm import llm
 from app.logging_config import logger
 from app.agent.state import AgentState
 from app.agent.retry import with_llm_retry
+from app.config import get_settings
 from app.security.sanitizers import (
     sanitize_input,
     check_for_injection,
@@ -42,6 +43,12 @@ ESCALATE_CLOSE_RESPONSE = (
     "Диалог завершён."
 )
 
+TURN_CAP_RESPONSE = (
+    "Достигнут лимит уточняющих сообщений по этой заявке. "
+    "Диалог завершён. Если проблема остаётся — дождитесь ответа специалиста "
+    "или создайте новое обращение."
+)
+
 CloseReason = Literal["goodbye", "success", "escalate", "turn_cap"]
 
 
@@ -57,16 +64,22 @@ def chat_handler(state: AgentState) -> dict:
 
     Логика:
     1. Валидирует и санитизирует user_input
-    2. Определяет причину закрытия (escalate → success → goodbye)
-    3. Вызывает LLM с историей диалога и контекстом заявки (или фиксированный ответ)
-    4. Добавляет user + assistant в messages через редуктор operator.add
-    5. Завершает диалог при close_reason
+    2. На follow-up (ticket_id) инкрементирует followup_turn_count
+    3. Определяет причину закрытия (escalate → success → goodbye → turn_cap)
+    4. Вызывает LLM с историей диалога и контекстом заявки (или фиксированный ответ)
+    5. Добавляет user + assistant в messages через редуктор operator.add
+    6. Завершает диалог при close_reason
     """
     start_time = time.time()
     thread_id = state.thread_id
     user_content = state.user_input.strip()
     normalized = _normalize_user_message(state.user_input)
     close_reason = _detect_close_reason(normalized)
+    is_followup = state.ticket_id is not None
+    followup_turn_count = (
+        state.followup_turn_count + 1 if is_followup else state.followup_turn_count
+    )
+    max_followup_turns = get_settings().RAG_MAX_FOLLOWUP_TURNS
 
     logger.debug(f"[{thread_id}] Начало обработки сообщения")
 
@@ -86,13 +99,24 @@ def chat_handler(state: AgentState) -> dict:
         response = ESCALATE_CLOSE_RESPONSE
     elif close_reason == "success":
         response = SUCCESS_CLOSE_RESPONSE
+    elif close_reason == "goodbye":
+        safe_input = sanitize_input(state.user_input)
+        response = _generate_response(
+            state,
+            safe_input,
+            thread_id,
+            is_goodbye=True,
+        )
+    elif is_followup and followup_turn_count > max_followup_turns:
+        close_reason = "turn_cap"
+        response = TURN_CAP_RESPONSE
     else:
         safe_input = sanitize_input(state.user_input)
         response = _generate_response(
             state,
             safe_input,
             thread_id,
-            is_goodbye=(close_reason == "goodbye"),
+            is_goodbye=False,
         )
 
     elapsed = time.time() - start_time
@@ -103,6 +127,7 @@ def chat_handler(state: AgentState) -> dict:
             "messages_before": len(state.messages),
             "elapsed_ms": round(elapsed * 1000, 2),
             "close_reason": close_reason,
+            "followup_turn_count": followup_turn_count if is_followup else None,
         },
     )
 
@@ -113,6 +138,9 @@ def chat_handler(state: AgentState) -> dict:
         ],
         "last_response": response,
     }
+
+    if is_followup:
+        result["followup_turn_count"] = followup_turn_count
 
     if close_reason is not None:
         result["dialog_closed"] = True
