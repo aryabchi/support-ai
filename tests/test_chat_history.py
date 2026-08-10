@@ -195,7 +195,7 @@ class TestChatPromptHelpers:
 
 
 class TestRouteAfterChat:
-    def test_dialog_closed_goes_to_end(self):
+    def test_dialog_closed_without_ticket_goes_to_end(self):
         state = AgentState(thread_id="t1", user_input="пока", dialog_closed=True)
         assert route_after_chat(state) == "end"
 
@@ -206,6 +206,17 @@ class TestRouteAfterChat:
             user_input="уточнение",
             ticket_id=42,
             done=True,
+        )
+        assert route_after_chat(state) == "dialog_end"
+
+    def test_success_close_with_ticket_goes_to_dialog_end(self):
+        """ticket_id раньше dialog_closed — success close должен resolve в dialog_end."""
+        state = AgentState(
+            thread_id="t1",
+            user_input="Спасибо, помогло!",
+            ticket_id=42,
+            dialog_closed=True,
+            close_reason="success",
         )
         assert route_after_chat(state) == "dialog_end"
 
