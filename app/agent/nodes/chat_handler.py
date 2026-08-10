@@ -1,4 +1,5 @@
 import time
+from typing import Literal
 from tenacity import RetryError
 
 from app.agent.llm import llm
@@ -17,11 +18,31 @@ MAX_MESSAGES = 50
 MAX_CONTEXT_MESSAGES = 10
 
 GOODBYE_WORDS = ("пока", "до свидания")
+ESCALATE_KEYWORDS = (
+    "оператор",
+    "поддержк",
+    "не помог",
+    "перезвоните",
+    "связаться с",
+    "живой человек",
+)
+SUCCESS_CLOSE_MAX_LEN = 40
 
 FALLBACK_RESPONSE = (
     "Сейчас не могу сформировать ответ. Попробуйте переформулировать вопрос "
     "или повторите запрос через минуту."
 )
+
+SUCCESS_CLOSE_RESPONSE = (
+    "Рады, что удалось помочь! Заявка будет отмечена как решённая. Всего доброго!"
+)
+
+ESCALATE_CLOSE_RESPONSE = (
+    "Передаю ваш запрос в службу поддержки. Специалист свяжется с вами. "
+    "Диалог завершён."
+)
+
+CloseReason = Literal["goodbye", "success", "escalate", "turn_cap"]
 
 
 @with_llm_retry(max_attempts=3)
@@ -36,14 +57,16 @@ def chat_handler(state: AgentState) -> dict:
 
     Логика:
     1. Валидирует и санитизирует user_input
-    2. Вызывает LLM с историей диалога и контекстом заявки
-    3. Добавляет user + assistant в messages через редуктор operator.add
-    4. Завершает диалог при прощальных фразах
+    2. Определяет причину закрытия (escalate → success → goodbye)
+    3. Вызывает LLM с историей диалога и контекстом заявки (или фиксированный ответ)
+    4. Добавляет user + assistant в messages через редуктор operator.add
+    5. Завершает диалог при close_reason
     """
     start_time = time.time()
     thread_id = state.thread_id
     user_content = state.user_input.strip()
-    user_content_lower = user_content.lower()
+    normalized = _normalize_user_message(state.user_input)
+    close_reason = _detect_close_reason(normalized)
 
     logger.debug(f"[{thread_id}] Начало обработки сообщения")
 
@@ -51,17 +74,25 @@ def chat_handler(state: AgentState) -> dict:
     if not is_valid:
         logger.warning(f"[{thread_id}] Превышена длина сообщения: {error_msg}")
         response = "Сообщение слишком длинное. Сократите текст до 10 000 символов и попробуйте снова."
+        close_reason = None
     elif check_for_injection(state.user_input):
         logger.warning(f"[{thread_id}] Prompt injection в чат-сообщении")
         response = (
             "Не могу обработать это сообщение. Опишите проблему обычным текстом, "
             "без специальных инструкций."
         )
+        close_reason = None
+    elif close_reason == "escalate":
+        response = ESCALATE_CLOSE_RESPONSE
+    elif close_reason == "success":
+        response = SUCCESS_CLOSE_RESPONSE
     else:
         safe_input = sanitize_input(state.user_input)
-        is_goodbye = _is_goodbye_message(user_content_lower)
         response = _generate_response(
-            state, safe_input, thread_id, is_goodbye=is_goodbye
+            state,
+            safe_input,
+            thread_id,
+            is_goodbye=(close_reason == "goodbye"),
         )
 
     elapsed = time.time() - start_time
@@ -71,6 +102,7 @@ def chat_handler(state: AgentState) -> dict:
             "thread_id": thread_id,
             "messages_before": len(state.messages),
             "elapsed_ms": round(elapsed * 1000, 2),
+            "close_reason": close_reason,
         },
     )
 
@@ -82,9 +114,12 @@ def chat_handler(state: AgentState) -> dict:
         "last_response": response,
     }
 
-    if _is_goodbye_message(user_content_lower):
+    if close_reason is not None:
         result["dialog_closed"] = True
-        logger.info(f"[{thread_id}] Диалог завершён пользователем")
+        result["close_reason"] = close_reason
+        logger.info(
+            f"[{thread_id}] Диалог завершён: close_reason={close_reason}",
+        )
 
     projected_count = len(state.messages) + 2
     if projected_count > MAX_MESSAGES:
@@ -97,14 +132,42 @@ def chat_handler(state: AgentState) -> dict:
     return result
 
 
-def _is_goodbye_message(user_content_lower: str) -> bool:
-    """Проверяет, прощается ли пользователь."""
-    if any(word in user_content_lower for word in GOODBYE_WORDS):
-        return True
-    return bool(
-        "спасибо" in user_content_lower
-        and ("пока" in user_content_lower or "до свидания" in user_content_lower)
-    )
+def _normalize_user_message(text: str) -> str:
+    """Нормализует сообщение пользователя для детекции закрытия диалога."""
+    return text.strip().lower()
+
+
+def _is_goodbye_message(normalized: str) -> bool:
+    """Проверяет прощание: только GOODBYE_WORDS (без «спасибо»)."""
+    return any(word in normalized for word in GOODBYE_WORDS)
+
+
+def _is_success_close(normalized: str) -> bool:
+    """
+    Успешное закрытие: короткое «спасибо» / «помогло» без вопроса.
+    Не пересекается с goodbye (сообщения с «пока» / «до свидания» — не success).
+    """
+    if "?" in normalized or len(normalized) > SUCCESS_CLOSE_MAX_LEN:
+        return False
+    if _is_goodbye_message(normalized):
+        return False
+    return "спасибо" in normalized or "помогло" in normalized
+
+
+def _is_escalate_message(normalized: str) -> bool:
+    """Пользователь хочет связаться с поддержкой / агент не помог."""
+    return any(keyword in normalized for keyword in ESCALATE_KEYWORDS)
+
+
+def _detect_close_reason(normalized: str) -> CloseReason | None:
+    """Порядок: escalate → success → goodbye."""
+    if _is_escalate_message(normalized):
+        return "escalate"
+    if _is_success_close(normalized):
+        return "success"
+    if _is_goodbye_message(normalized):
+        return "goodbye"
+    return None
 
 
 def _build_history_block(messages: list[dict]) -> str:

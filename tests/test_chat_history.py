@@ -82,13 +82,13 @@ class TestChatHandler:
         assert "Приоритет: high" in prompt
 
     @patch("app.agent.nodes.chat_handler._chat_llm_call")
-    def test_thanks_without_goodbye_does_not_close_dialog(self, mock_llm):
-        mock_llm.return_value = _mock_llm_response("Рады были помочь!")
-
+    def test_success_close_sets_dialog_closed(self, mock_llm):
         state = AgentState(thread_id="t1", user_input="Спасибо, помогло!")
         result = chat_handler(state)
 
-        assert result.get("dialog_closed") is not True
+        assert result["dialog_closed"] is True
+        assert result["close_reason"] == "success"
+        mock_llm.assert_not_called()
 
     @patch("app.agent.nodes.chat_handler._chat_llm_call")
     def test_goodbye_sets_dialog_closed(self, mock_llm):
@@ -98,8 +98,19 @@ class TestChatHandler:
         result = chat_handler(state)
 
         assert result["dialog_closed"] is True
+        assert result["close_reason"] == "goodbye"
         assert "done" not in result
 
+    @patch("app.agent.nodes.chat_handler._chat_llm_call")
+    def test_thanks_with_question_does_not_close_dialog(self, mock_llm):
+        mock_llm.return_value = _mock_llm_response("Уточните, какой пароль?")
+
+        state = AgentState(thread_id="t1", user_input="Спасибо, а пароль?")
+        result = chat_handler(state)
+
+        assert result.get("dialog_closed") is not True
+        assert "close_reason" not in result
+        mock_llm.assert_called_once()
     @patch("app.agent.nodes.chat_handler._chat_llm_call")
     def test_goodbye_uses_farewell_prompt(self, mock_llm):
         mock_llm.return_value = _mock_llm_response("Рады были помочь! Всего доброго.")
