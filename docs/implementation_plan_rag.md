@@ -384,7 +384,7 @@ curl.exe -X POST "http://localhost:8080/tickets/chat/rag_success_001/messages" `
 # A3 — Follow-up 2 (still within turn budget)
 curl.exe -X POST "http://localhost:8080/tickets/chat/rag_success_001/messages" `
   -H "Content-Type: application/json" `
-  -d '{"content":"Пробовал сброс пароля, не помогло"}'
+  -d '{"content":"Пробовал сброс пароля, не сработал"}'
 
 # A4 — Success close
 curl.exe -X POST "http://localhost:8080/tickets/chat/rag_success_001/messages" `
@@ -426,7 +426,7 @@ curl.exe -X POST "http://localhost:8080/tickets/chat/rag_ncap_001/messages" `
 # B3 — Follow-up 2 (turn 2, last allowed)
 curl.exe -X POST "http://localhost:8080/tickets/chat/rag_ncap_001/messages" `
   -H "Content-Type: application/json" `
-  -d '{"content":"Сброс пароля не помог"}'
+  -d '{"content":"Сброс пароля не сработал"}'
 
 # B4 — Follow-up 3 (turn 3 → N-cap)
 curl.exe -X POST "http://localhost:8080/tickets/chat/rag_ncap_001/messages" `
