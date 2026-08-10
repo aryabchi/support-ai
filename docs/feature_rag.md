@@ -89,35 +89,28 @@ or `null` when RAG was not used. Mapped from state `rag_source_paths` on chat PO
 
 ---
 
-## Manual E2E (PowerShell)
+## Manual E2E (bash)
 
-Assumptions: app on `:8080`, Qdrant ingested, `RAG_MAX_FOLLOWUP_TURNS=2`, fresh `thread_id` per scenario. Use `curl.exe` as in [README.md](../README.md). Replace `{TICKET_ID}` with `id` from create.
+Assumptions: app on `:8080`, Qdrant ingested, `RAG_MAX_FOLLOWUP_TURNS=2`, fresh `thread_id` per scenario. Replace `TICKET_ID` with `id` from the create response.
+
+**Windows / Git Bash note:** Prefer `--data-binary @file` (or escaped `\"` inside double quotes). Do **not** use `-d '{"k":"v"}'` with Windows `curl.exe` — it often strips JSON quotes and may send a leading `'`, which yields `{"detail":"There was an error parsing the body"}`.
 
 **Note:** Avoid escalate substrings like `не помог` in follow-ups meant to stay open (use e.g. «не сработал»).
 
 ### Scenario A — Success close → `resolved` + `source_paths`
 
-```powershell
-curl.exe -X POST "http://localhost:8080/tickets/" `
-  -H "Content-Type: application/json" `
-  -d '{"thread_id":"rag_success_001","user_input":"Не могу войти в аккаунт, ошибка 401"}'
-
-# Note TICKET_ID from response
-
-curl.exe -X POST "http://localhost:8080/tickets/chat/rag_success_001/messages" `
-  -H "Content-Type: application/json" `
-  -d '{"content":"Ошибка 401 при вводе пароля"}'
-
-curl.exe -X POST "http://localhost:8080/tickets/chat/rag_success_001/messages" `
-  -H "Content-Type: application/json" `
-  -d '{"content":"Пробовал сброс пароля, не сработал"}'
-
-curl.exe -X POST "http://localhost:8080/tickets/chat/rag_success_001/messages" `
-  -H "Content-Type: application/json" `
-  -d '{"content":"Спасибо, помогло!"}'
-
-curl.exe "http://localhost:8080/tickets/chat/rag_success_001"
-curl.exe "http://localhost:8080/tickets/{TICKET_ID}"
+```bash
+printf '%s' '{"thread_id":"rag_success_001","user_input":"Не могу войти в аккаунт, ошибка 401"}' > /tmp/rag_a1.json
+curl -s -X POST "http://127.0.0.1:8080/tickets/" -H "Content-Type: application/json; charset=utf-8" --data-binary @/tmp/rag_a1.json
+# Note TICKET_ID from response, then:
+printf '%s' '{"content":"Ошибка 401 при вводе пароля"}' > /tmp/rag_a2.json
+curl -s -X POST "http://127.0.0.1:8080/tickets/chat/rag_success_001/messages" -H "Content-Type: application/json; charset=utf-8" --data-binary @/tmp/rag_a2.json
+printf '%s' '{"content":"Пробовал сброс пароля, не сработал"}' > /tmp/rag_a3.json
+curl -s -X POST "http://127.0.0.1:8080/tickets/chat/rag_success_001/messages" -H "Content-Type: application/json; charset=utf-8" --data-binary @/tmp/rag_a3.json
+printf '%s' '{"content":"Спасибо, помогло!"}' > /tmp/rag_a4.json
+curl -s -X POST "http://127.0.0.1:8080/tickets/chat/rag_success_001/messages" -H "Content-Type: application/json; charset=utf-8" --data-binary @/tmp/rag_a4.json
+curl -s "http://127.0.0.1:8080/tickets/chat/rag_success_001"
+curl -s "http://127.0.0.1:8080/tickets/TICKET_ID"
 ```
 
 | Check | Expect |
@@ -128,29 +121,19 @@ curl.exe "http://localhost:8080/tickets/{TICKET_ID}"
 
 ### Scenario B — N-cap (dialog closes, status unchanged)
 
-```powershell
-curl.exe -X POST "http://localhost:8080/tickets/" `
-  -H "Content-Type: application/json" `
-  -d '{"thread_id":"rag_ncap_001","user_input":"Не могу войти в аккаунт"}'
-
-curl.exe -X POST "http://localhost:8080/tickets/chat/rag_ncap_001/messages" `
-  -H "Content-Type: application/json" `
-  -d '{"content":"Ошибка 401 при вводе пароля"}'
-
-curl.exe -X POST "http://localhost:8080/tickets/chat/rag_ncap_001/messages" `
-  -H "Content-Type: application/json" `
-  -d '{"content":"Сброс пароля не сработал"}'
-
-curl.exe -X POST "http://localhost:8080/tickets/chat/rag_ncap_001/messages" `
-  -H "Content-Type: application/json" `
-  -d '{"content":"Что ещё можно попробовать?"}'
-
-curl.exe "http://localhost:8080/tickets/chat/rag_ncap_001"
-curl.exe "http://localhost:8080/tickets/{TICKET_ID}"
-
-curl.exe -X POST "http://localhost:8080/tickets/chat/rag_ncap_001/messages" `
-  -H "Content-Type: application/json" `
-  -d '{"content":"Ещё вопрос"}'
+```bash
+printf '%s' '{"thread_id":"rag_ncap_001","user_input":"Не могу войти в аккаунт"}' > /tmp/rag_b1.json
+curl -s -X POST "http://127.0.0.1:8080/tickets/" -H "Content-Type: application/json; charset=utf-8" --data-binary @/tmp/rag_b1.json
+printf '%s' '{"content":"Ошибка 401 при вводе пароля"}' > /tmp/rag_b2.json
+curl -s -X POST "http://127.0.0.1:8080/tickets/chat/rag_ncap_001/messages" -H "Content-Type: application/json; charset=utf-8" --data-binary @/tmp/rag_b2.json
+printf '%s' '{"content":"Сброс пароля не сработал"}' > /tmp/rag_b3.json
+curl -s -X POST "http://127.0.0.1:8080/tickets/chat/rag_ncap_001/messages" -H "Content-Type: application/json; charset=utf-8" --data-binary @/tmp/rag_b3.json
+printf '%s' '{"content":"Что ещё можно попробовать?"}' > /tmp/rag_b4.json
+curl -s -X POST "http://127.0.0.1:8080/tickets/chat/rag_ncap_001/messages" -H "Content-Type: application/json; charset=utf-8" --data-binary @/tmp/rag_b4.json
+curl -s "http://127.0.0.1:8080/tickets/chat/rag_ncap_001"
+curl -s "http://127.0.0.1:8080/tickets/TICKET_ID"
+printf '%s' '{"content":"Ещё вопрос"}' > /tmp/rag_b5.json
+curl -s -X POST "http://127.0.0.1:8080/tickets/chat/rag_ncap_001/messages" -H "Content-Type: application/json; charset=utf-8" --data-binary @/tmp/rag_b5.json
 ```
 
 | Check | Expect |
@@ -162,21 +145,15 @@ curl.exe -X POST "http://localhost:8080/tickets/chat/rag_ncap_001/messages" `
 
 ### Scenario C — Goodbye (status unchanged)
 
-```powershell
-curl.exe -X POST "http://localhost:8080/tickets/" `
-  -H "Content-Type: application/json" `
-  -d '{"thread_id":"rag_goodbye_001","user_input":"Не могу войти в аккаунт"}'
-
-curl.exe -X POST "http://localhost:8080/tickets/chat/rag_goodbye_001/messages" `
-  -H "Content-Type: application/json" `
-  -d '{"content":"Ошибка 401 при вводе пароля"}'
-
-curl.exe -X POST "http://localhost:8080/tickets/chat/rag_goodbye_001/messages" `
-  -H "Content-Type: application/json" `
-  -d '{"content":"Спасибо, пока!"}'
-
-curl.exe "http://localhost:8080/tickets/chat/rag_goodbye_001"
-curl.exe "http://localhost:8080/tickets/{TICKET_ID}"
+```bash
+printf '%s' '{"thread_id":"rag_goodbye_001","user_input":"Не могу войти в аккаунт"}' > /tmp/rag_c1.json
+curl -s -X POST "http://127.0.0.1:8080/tickets/" -H "Content-Type: application/json; charset=utf-8" --data-binary @/tmp/rag_c1.json
+printf '%s' '{"content":"Ошибка 401 при вводе пароля"}' > /tmp/rag_c2.json
+curl -s -X POST "http://127.0.0.1:8080/tickets/chat/rag_goodbye_001/messages" -H "Content-Type: application/json; charset=utf-8" --data-binary @/tmp/rag_c2.json
+printf '%s' '{"content":"Спасибо, пока!"}' > /tmp/rag_c3.json
+curl -s -X POST "http://127.0.0.1:8080/tickets/chat/rag_goodbye_001/messages" -H "Content-Type: application/json; charset=utf-8" --data-binary @/tmp/rag_c3.json
+curl -s "http://127.0.0.1:8080/tickets/chat/rag_goodbye_001"
+curl -s "http://127.0.0.1:8080/tickets/TICKET_ID"
 ```
 
 | Check | Expect |
