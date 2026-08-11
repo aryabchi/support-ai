@@ -1,0 +1,10 @@
+---
+alwaysApply: true
+---
+
+Before executing shell commands make sure you are in the right virtual environment.
+
+Actiavte it with
+```bash
+pyenv-venv activate ai-course
+```

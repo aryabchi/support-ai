@@ -39,6 +39,14 @@ class AgentState(BaseModel):
     # === Дополнительные поля ===
     ticket_id: int | None = None
 
+    # === RAG / follow-up (defaults for backward compat) ===
+    followup_turn_count: int = 0
+    close_reason: (
+        Literal["goodbye", "success", "escalate", "turn_cap"] | None
+    ) = None
+    rag_source_paths: list[str] | None = None
+    rag_used: bool = False
+
     def to_dict(self) -> dict:
         """Конвертирует состояние в dict для обновления в LangGraph."""
         return self.model_dump(exclude_unset=True)
