@@ -10,3 +10,4 @@ alwaysApply: false
 - Minimize API surface changes.
 - Explain architectural trade-offs before proposing refactors.
 - Preserve backward compatibility unless the task explicitly allows breaking changes.
+- When the user questions or disagrees with an implementation decision, explain and evaluate the decision before modifying code. Do not silently replace the implementation based on the user's suggestion if the change has architectural implications. For substantial design disagreements, compare the proposed alternatives against existing repository patterns and explain the trade-offs.

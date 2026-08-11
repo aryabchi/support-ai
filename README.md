@@ -10,7 +10,7 @@ User submits incident via API request
 → (If `critical` or `high` + `requires_approval`) Sends TG alert (currently disabled)  
 → (Otherwise or after HIL confirmation) Saves incident to database  
 → App saves Agent state and sends web response  
-→ (Unless user says "goodbuy") Follow-up chat may continue via new API calls
+→ (Unless dialog is closed: goodbye / success / escalate / turn cap) Follow-up chat may continue via new API calls; follow-ups can use RAG when Qdrant is available
 
 # Agent Graph Flow
 
@@ -18,10 +18,10 @@ User submits incident via API request
 flowchart TD
     START([START]) --> chat[chat<br/>chat_handler]
 
-    chat -->|route_after_chat| R0{dialog_closed?}
-    R0 -->|yes| endNode[end<br/>dialog_closed=True]
-    R0 -->|no| R0b{ticket_id is not None?}
-    R0b -->|yes: follow-up| dialogEnd[dialog_end<br/>no-op]
+    chat -->|route_after_chat| R0{ticket_id set?}
+    R0 -->|yes: follow-up| dialogEnd[dialog_end<br/>resolve on success]
+    R0 -->|no| R0b{dialog_closed?}
+    R0b -->|yes| endNode[end<br/>dialog_closed=True]
     R0b -->|no: new ticket| classifier[classifier<br/>classify_ticket]
 
     classifier --> prioritizer[prioritizer<br/>prioritize_ticket]
@@ -51,13 +51,17 @@ flowchart TD
 - LangGraph (tasks orchestration)
 - FastAPI (REST API endpoints)
 - Ollama (LLMs)
-- PostgreSQL (state persistence and datastore) 
-- Docker (app containerization)
+- PostgreSQL (state persistence and datastore)
+- Qdrant (RAG vector store; host process, not in Compose for v1)
+- SentenceTransformers / HuggingFace MiniLM (embeddings)
+- Docker (app + Postgres containerization)
 
 # Features
 
 - Human-in-the-Loop
 - Multiturn dialog (chat with history)
+- RAG-grounded dialog follow-up (Qdrant + MiniLM)
+- Dialog close: goodbye / success→ticket status `resolved` / escalate / turns limit hit
 - Agent graph with LLM and deterministic nodes + conditional edges
 - Agent state persistence (AsyncPostgresSaver checkpointer)
 - FastAPI endpoints for http agent invocations
@@ -107,6 +111,59 @@ docker run -d --name support-ai-db -e POSTGRES_USER=support -e POSTGRES_PASSWORD
 ```bash
 uvicorn app.main:app --port=8080 --reload
 ```
+
+# Test RAG follow-up (optional)
+
+Full feature notes and E2E curls: [`docs/feature_rag.md`](docs/feature_rag.md).
+
+1. Run Qdrant locally as Docker (default `http://localhost:6333`). **Not part** of Compose in v1.
+Sample `docker-compose.yml`
+```yml
+services:
+  qdrant:
+    image: qdrant/qdrant:latest
+    container_name: qdrant
+    ports:
+      - "6333:6333"   # REST API + Web UI
+      - "6334:6334"   # gRPC API
+    volumes:
+      - ./qdrant_storage:/qdrant/storage
+    environment:
+      QDRANT__LOG_LEVEL: INFO
+    restart: unless-stopped
+    mem_limit: 4g
+    cpus: 2
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c ':> /dev/tcp/127.0.0.1/6333' || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+```
+2. Ensure `.env` includes the RAG block (see `.env.example`):
+
+```env
+QDRANT_URL=http://localhost:6333
+QDRANT_COLLECTION=support_ai_kb
+RAG_TOP_K=3
+RAG_EMBED_MODEL=all-MiniLM-L6-v2
+RAG_MAX_FOLLOWUP_TURNS=2
+RAG_DOCS_PATH=data/rag_docs
+```
+
+3. Ingest corpus:
+
+```bash
+python scripts/ingest_rag_docs.py
+```
+
+4. Optional offline eval:
+
+```bash
+python scripts/eval_rag.py --retrieval-only
+```
+
+Follow-up chat responses may include `"source_paths": ["technical/....md"]` when retrieval hits. Success phrase `"Спасибо, помогло!"` closes the dialog and sets ticket `status` to `resolved`.
 
 
 # Test HIL Interrupt/Resume

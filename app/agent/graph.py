@@ -4,6 +4,7 @@ from app.agent.nodes.alert import send_critical_alert
 from app.agent.nodes.chat_handler import chat_handler
 from app.agent.nodes.classifier import classify_ticket
 from app.agent.nodes.confirmation import confirmation_node
+from app.agent.nodes.dialog_end import dialog_end
 from app.agent.nodes.prioritizer import prioritize_ticket
 from app.agent.nodes.saver import save_ticket
 from app.agent.nodes.tagger import tag_ticket
@@ -13,11 +14,15 @@ from langgraph.graph import END, START, StateGraph
 
 
 def route_after_chat(state: AgentState) -> str:
-    """После chat_handler: завершение, follow-up без повторного пайплайна или classifier."""
-    if state.dialog_closed:
-        return "end"
+    """После chat_handler: follow-up (в т.ч. close+resolve), end без ticket, или classifier.
+
+    Важно: ticket_id проверяется раньше dialog_closed, чтобы success-close
+    на follow-up дошёл до async dialog_end и обновил статус заявки.
+    """
     if state.ticket_id is not None:
         return "dialog_end"
+    if state.dialog_closed:
+        return "end"
     return "classifier"
 
 
@@ -45,11 +50,6 @@ def route_after_confirmation(state: AgentState) -> str:
     if state.confirmed is False:
         return "end"  # не сохраняем отклонённые заявки
     return "saver"
-
-
-def dialog_end(state: AgentState) -> dict:
-    """Follow-up: ответ уже сгенерирован в chat_handler, пайплайн не перезапускаем."""
-    return {}
 
 
 def build_agent_graph(checkpointer: BaseCheckpointSaver | None = None):
